@@ -11,8 +11,19 @@ create table public.profiles (
   role public.academy_role not null default 'learner',
   school text not null default '',
   phone text not null default '',
+  requires_password_change boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
+);
+
+create table public.student_details (
+  profile_id uuid primary key references public.profiles (id) on delete cascade,
+  registration_number text not null unique,
+  class_name text not null default '',
+  date_of_birth date,
+  contact_number text not null default '',
+  academic_year text not null default '',
+  gender text not null default ''
 );
 
 create table public.subjects (
@@ -121,12 +132,29 @@ begin
     raise exception 'Username must be 3 to 30 letters, numbers, or underscores';
   end if;
 
-  insert into public.profiles (id, username, full_name)
+  insert into public.profiles (id, username, full_name, requires_password_change)
   values (
     new.id,
     requested_username,
-    coalesce(nullif(trim(new.raw_user_meta_data ->> 'full_name'), ''), requested_username)
+    coalesce(nullif(trim(new.raw_user_meta_data ->> 'full_name'), ''), requested_username),
+    coalesce((new.raw_user_meta_data ->> 'requires_password_change')::boolean, false)
   );
+  return new;
+end;
+$$;
+
+create function public.clear_password_change_requirement()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if new.encrypted_password is distinct from old.encrypted_password then
+    update public.profiles
+    set requires_password_change = false, updated_at = now()
+    where id = new.id;
+  end if;
   return new;
 end;
 $$;
@@ -135,7 +163,12 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.create_profile_for_new_user();
 
+create trigger on_auth_user_password_changed
+  after update of encrypted_password on auth.users
+  for each row execute function public.clear_password_change_requirement();
+
 alter table public.profiles enable row level security;
+alter table public.student_details enable row level security;
 alter table public.subjects enable row level security;
 alter table public.enrollments enable row level security;
 alter table public.events enable row level security;
@@ -146,6 +179,7 @@ alter table public.messages enable row level security;
 
 grant select on public.profiles to authenticated;
 grant update (username, full_name, school, phone) on public.profiles to authenticated;
+grant select on public.student_details to authenticated;
 grant select, insert, update, delete on public.subjects to authenticated;
 grant select, insert, delete on public.enrollments to authenticated;
 grant select, insert, update, delete on public.events to authenticated;
@@ -176,6 +210,13 @@ create policy "Users can update their own profile"
   with check (
     id = (select auth.uid())
     and role = (select public.current_academy_role())
+  );
+
+create policy "Students and admins can read student details"
+  on public.student_details for select to authenticated
+  using (
+    profile_id = (select auth.uid())
+    or (select public.current_academy_role()) = 'admin'
   );
 
 create policy "Authenticated users can read subjects"

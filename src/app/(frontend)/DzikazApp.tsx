@@ -283,23 +283,11 @@ const initialSubjects: Subject[] = [
 function Logo({ compact = false }: { compact?: boolean }) {
   return (
     <div className="flex items-center gap-3">
-      <div className="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#E6D8C3] text-[#31533d]">
-        <svg viewBox="0 0 40 40" className="h-7 w-7" fill="none">
-          <path d="M6 29 15.5 13l4.2 7L24.5 9 35 29H6Z" fill="currentColor" opacity=".28" />
-          <path
-            d="m7 29 8.5-16 5 8L25 9l10 20"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinejoin="round"
-          />
-          <path
-            d="m15 29 5-8 4 6 3-5 5 7"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </div>
+      <img
+        src="/assets/st_dzikaz_logo.jpg.jpeg"
+        alt="St Dzikaz Academy"
+        className="h-10 w-10 shrink-0 rounded-xl bg-white object-contain"
+      />
       {!compact && (
         <div>
           <div className="font-display text-lg font-bold leading-none tracking-tight">
@@ -1345,102 +1333,171 @@ function NoticeBoard({
   )
 }
 
-const events = [
-  {
-    day: '18',
-    month: 'JUN',
-    title: 'O Level Mathematics Paper 2 revision',
-    detail: '14:00–15:30 · Live classroom',
-    date: '20260618T120000Z/20260618T133000Z',
-  },
-  {
-    day: '21',
-    month: 'JUN',
-    title: 'ZIMSEC English Language writing clinic',
-    detail: '10:00–11:00 · Online',
-    date: '20260621T080000Z/20260621T090000Z',
-  },
-  {
-    day: '27',
-    month: 'JUN',
-    title: 'A Level Physics practical preparation',
-    detail: '09:00–11:00 · Science laboratory',
-    date: '20260627T070000Z/20260627T090000Z',
-  },
-  {
-    day: '04',
-    month: 'JUL',
-    title: 'Career pathways webinar',
-    detail: '16:00–17:00 · Online',
-    date: '20260704T140000Z/20260704T150000Z',
-  },
-]
+type AcademyEvent = {
+  id: string
+  title: string
+  description: string
+  location: string
+  starts_at: string
+  ends_at: string
+  audience: string
+}
 
-function CalendarPage() {
-  const calendarUrl = (event: (typeof events)[number]) =>
-    `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(event.title)}&dates=${event.date}&details=${encodeURIComponent('Dzikaz Academy — Reaching learning heights')}`
+function CalendarPage({ role, userId, supabase }: {
+  role: Role
+  userId: string
+  supabase: SupabaseClient
+}) {
+  const [events, setEvents] = useState<AcademyEvent[]>([])
+  const [showForm, setShowForm] = useState(false)
+  const [title, setTitle] = useState('')
+  const [description, setDescription] = useState('')
+  const [location, setLocation] = useState('')
+  const [startsAt, setStartsAt] = useState('')
+  const [endsAt, setEndsAt] = useState('')
+  const [audience, setAudience] = useState('everyone')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(true)
+  const canManage = role === 'Instructor' || role === 'Admin'
+
+  useEffect(() => {
+    let active = true
+    const loadEvents = async () => {
+      const { data, error: queryError } = await supabase
+        .from('events')
+        .select('id, title, description, location, starts_at, ends_at, audience')
+        .gte('ends_at', new Date().toISOString())
+        .order('starts_at')
+      if (!active) return
+      if (queryError) setError(queryError.message)
+      else setEvents(data ?? [])
+      setLoading(false)
+    }
+    void loadEvents()
+    return () => { active = false }
+  }, [supabase])
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    setError('')
+    const start = new Date(startsAt)
+    const end = new Date(endsAt)
+    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end <= start) {
+      setError('Choose a valid end time after the start time.')
+      return
+    }
+    const { data, error: insertError } = await supabase
+      .from('events')
+      .insert({
+        title: title.trim(),
+        description: description.trim(),
+        location: location.trim(),
+        starts_at: start.toISOString(),
+        ends_at: end.toISOString(),
+        audience,
+        created_by: userId,
+      })
+      .select('id, title, description, location, starts_at, ends_at, audience')
+      .single()
+    if (insertError) {
+      setError(insertError.message)
+      return
+    }
+    setEvents((current) => [...current, data].sort((a, b) => a.starts_at.localeCompare(b.starts_at)))
+    setTitle('')
+    setDescription('')
+    setLocation('')
+    setStartsAt('')
+    setEndsAt('')
+    setShowForm(false)
+  }
+
+  const calendarUrl = (event: AcademyEvent) => {
+    const formatDate = (value: string) => new Date(value).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')
+    const details = [event.description, event.location].filter(Boolean).join('\n')
+    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(event.title)}&dates=${formatDate(event.starts_at)}/${formatDate(event.ends_at)}&details=${encodeURIComponent(details)}`
+  }
   return (
     <DashboardFrame
       eyebrow="Learning schedule"
       title="Events calendar"
       subtitle="Stay on track with revision sessions, assessments, and academy events."
+      action={canManage ? '+ Add event' : undefined}
+      onAction={canManage ? () => setShowForm(true) : undefined}
     >
-      <div className="grid gap-6 xl:grid-cols-[1.2fr_.8fr]">
-        <div className="card overflow-hidden">
-          <div className="border-b border-[#31533d]/8 bg-[#E6D8C3]/20 px-6 py-4">
-            <h2 className="font-display font-bold">Upcoming events</h2>
+      {error && <p role="alert" className="mb-4 rounded-lg bg-[#9b7466]/10 p-3 text-sm text-[#8a5548]">{error}</p>}
+      {showForm && (
+        <form onSubmit={submit} className="card mb-6 grid gap-4 p-5 md:grid-cols-2">
+          <div className="flex items-center justify-between md:col-span-2">
+            <h2 className="font-display font-bold">Create an event</h2>
+            <button type="button" onClick={() => setShowForm(false)} aria-label="Close"><Icon name="x" /></button>
           </div>
+          <Field label="Event title">
+            <input className="form-input" value={title} onChange={(event) => setTitle(event.target.value)} required maxLength={160} />
+          </Field>
+          <Field label="Audience">
+            <select className="form-input" value={audience} onChange={(event) => setAudience(event.target.value)}>
+              <option value="everyone">Everyone</option>
+              <option value="learner">Learners</option>
+              <option value="instructor">Instructors</option>
+              <option value="admin">Administrators</option>
+            </select>
+          </Field>
+          <Field label="Starts">
+            <input className="form-input" type="datetime-local" value={startsAt} onChange={(event) => setStartsAt(event.target.value)} required />
+          </Field>
+          <Field label="Ends">
+            <input className="form-input" type="datetime-local" value={endsAt} onChange={(event) => setEndsAt(event.target.value)} required />
+          </Field>
+          <Field label="Location">
+            <input className="form-input" value={location} onChange={(event) => setLocation(event.target.value)} placeholder="Online or venue" />
+          </Field>
+          <Field label="Description">
+            <input className="form-input" value={description} onChange={(event) => setDescription(event.target.value)} />
+          </Field>
+          <div className="flex justify-end gap-2 md:col-span-2">
+            <button type="button" onClick={() => setShowForm(false)} className="secondary-button">Cancel</button>
+            <button className="primary-button">Publish event</button>
+          </div>
+        </form>
+      )}
+      <div className="card overflow-hidden">
+        <div className="border-b border-[#31533d]/8 bg-[#E6D8C3]/20 px-6 py-4">
+          <h2 className="font-display font-bold">Upcoming events</h2>
+        </div>
+        {loading ? <p className="p-6 text-sm text-[#789083]">Loading events…</p> : events.length ? (
           <div className="divide-y divide-[#31533d]/8">
             {events.map((event) => (
-              <div key={event.title} className="flex items-center gap-4 p-5">
+              <article key={event.id} className="flex items-center gap-4 p-5">
                 <div className="grid h-14 w-14 shrink-0 place-items-center rounded-xl bg-[#5D866C] text-center text-white">
                   <div>
-                    <p className="text-[9px] font-bold tracking-wider">{event.month}</p>
-                    <p className="font-display text-xl font-bold leading-none">{event.day}</p>
+                    <p className="text-[9px] font-bold tracking-wider">{new Date(event.starts_at).toLocaleDateString('en-ZW', { month: 'short' }).toUpperCase()}</p>
+                    <p className="font-display text-xl font-bold leading-none">{new Date(event.starts_at).getDate()}</p>
                   </div>
                 </div>
                 <div className="min-w-0 flex-1">
                   <h3 className="text-sm font-bold">{event.title}</h3>
-                  <p className="mt-1 text-xs text-[#789083]">{event.detail}</p>
+                  <p className="mt-1 text-xs text-[#789083]">{new Date(event.starts_at).toLocaleString()} – {new Date(event.ends_at).toLocaleTimeString()} · {event.location || 'Online'}</p>
+                  {event.description && <p className="mt-2 text-sm text-[#718078]">{event.description}</p>}
                 </div>
-                <a
-                  href={calendarUrl(event)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="secondary-button hidden sm:inline-flex"
-                >
-                  Add to Google Calendar
-                </a>
-              </div>
+                <a href={calendarUrl(event)} target="_blank" rel="noreferrer" className="secondary-button hidden sm:inline-flex">Add to Google Calendar</a>
+                {canManage && (
+                  <button
+                    onClick={async () => {
+                      const { error: deleteError } = await supabase.from('events').delete().eq('id', event.id)
+                      if (deleteError) setError(deleteError.message)
+                      else setEvents((current) => current.filter((item) => item.id !== event.id))
+                    }}
+                    aria-label={`Delete ${event.title}`}
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-[#9b7466]/20 text-[#9b7466] hover:bg-[#9b7466]/10"
+                  >
+                    <Icon name="trash" size={15} />
+                  </button>
+                )}
+              </article>
             ))}
           </div>
-        </div>
-        <div className="card p-5">
-          <div className="flex items-center justify-between">
-            <h2 className="font-display font-bold">June 2026</h2>
-            <span className="rounded-lg bg-[#E6D8C3]/50 px-2.5 py-1 text-[10px] font-bold text-[#5D866C]">
-              Exam season
-            </span>
-          </div>
-          <div className="mt-5 grid grid-cols-7 gap-1 text-center">
-            {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((day, i) => (
-              <span key={`${day}-${i}`} className="py-2 text-[9px] font-bold text-[#8b9890]">
-                {day}
-              </span>
-            ))}
-            {Array.from({ length: 30 }, (_, i) => i + 1).map((day) => (
-              <button
-                key={day}
-                className={`aspect-square rounded-lg text-xs font-semibold ${[18, 21, 27].includes(day) ? 'bg-[#5D866C] text-white' : day === 14 ? 'bg-[#E6D8C3] text-[#31533d]' : 'hover:bg-[#E6D8C3]/40'}`}
-              >
-                {day}
-              </button>
-            ))}
-          </div>
-          <p className="mt-5 rounded-xl bg-[#F5F5F0] p-3 text-xs leading-5 text-[#718078]">
-            Select a highlighted date to view scheduled ZIMSEC revision activities.
-          </p>
-        </div>
+        ) : <p className="p-6 text-sm text-[#789083]">No upcoming events have been added.</p>}
       </div>
     </DashboardFrame>
   )
@@ -1449,15 +1506,55 @@ function CalendarPage() {
 function SubjectsPage({
   subjects,
   setSubjects,
+  userId,
+  supabase,
 }: {
   subjects: Subject[]
   setSubjects: (subjects: Subject[]) => void
+  userId: string
+  supabase: SupabaseClient
 }) {
   const [editing, setEditing] = useState<Subject | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [name, setName] = useState('')
   const [level, setLevel] = useState<Subject['level']>('O Level')
   const [code, setCode] = useState('')
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let active = true
+    const loadSubjects = async () => {
+      const { data, error: queryError } = await supabase
+        .from('subjects')
+        .select('id, name, level, code')
+        .eq('instructor_id', userId)
+        .order('name')
+      if (!active) return
+      if (queryError) {
+        setError(queryError.message)
+        return
+      }
+      const subjectIds = (data ?? []).map((subject) => subject.id)
+      const { data: enrollments, error: enrollmentError } = subjectIds.length
+        ? await supabase.from('enrollments').select('subject_id').in('subject_id', subjectIds)
+        : { data: [], error: null }
+      if (!active) return
+      if (enrollmentError) {
+        setError(enrollmentError.message)
+        return
+      }
+      const learnerCounts = new Map<string, number>()
+      for (const enrollment of enrollments ?? []) {
+        learnerCounts.set(enrollment.subject_id, (learnerCounts.get(enrollment.subject_id) ?? 0) + 1)
+      }
+      setSubjects((data ?? []).map((subject) => ({
+        ...subject,
+        learners: learnerCounts.get(subject.id) ?? 0,
+      })))
+    }
+    void loadSubjects()
+    return () => { active = false }
+  }, [setSubjects, supabase, userId])
 
   const openEdit = (subject: Subject) => {
     setEditing(subject)
@@ -1473,23 +1570,22 @@ function SubjectsPage({
     setLevel('O Level')
     setShowForm(false)
   }
-  const submit = (event: FormEvent) => {
+  const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (!name.trim() || !code.trim()) return
-    if (editing) {
-      setSubjects(
-        subjects.map((subject) =>
-          subject.id === editing.id
-            ? { ...subject, name: name.trim(), level, code: code.trim() }
-            : subject,
-        ),
-      )
-    } else {
-      setSubjects([
-        ...subjects,
-        { id: crypto.randomUUID(), name: name.trim(), level, code: code.trim(), learners: 0 },
-      ])
+    setError('')
+    const values = { name: name.trim(), level, code: code.trim() }
+    const result = editing
+      ? await supabase.from('subjects').update(values).eq('id', editing.id).select('id, name, level, code').single()
+      : await supabase.from('subjects').insert({ ...values, instructor_id: userId }).select('id, name, level, code').single()
+    if (result.error) {
+      setError(result.error.message)
+      return
     }
+    const savedSubject = { ...result.data, learners: editing?.learners ?? 0 }
+    setSubjects(editing
+      ? subjects.map((subject) => subject.id === editing.id ? savedSubject : subject)
+      : [...subjects, savedSubject])
     reset()
   }
   return (
@@ -1500,6 +1596,7 @@ function SubjectsPage({
       action="+ Add subject"
       onAction={() => setShowForm(true)}
     >
+      {error && <p role="alert" className="mb-4 rounded-lg bg-[#9b7466]/10 p-3 text-sm text-[#8a5548]">{error}</p>}
       {showForm && (
         <form onSubmit={submit} className="card mb-6 grid gap-4 p-5 md:grid-cols-3">
           <Field label="Subject name">
@@ -1560,7 +1657,11 @@ function SubjectsPage({
                 <Icon name="edit" size={14} /> Edit
               </button>
               <button
-                onClick={() => setSubjects(subjects.filter((item) => item.id !== subject.id))}
+                onClick={async () => {
+                  const { error: deleteError } = await supabase.from('subjects').delete().eq('id', subject.id)
+                  if (deleteError) setError(deleteError.message)
+                  else setSubjects(subjects.filter((item) => item.id !== subject.id))
+                }}
                 className="grid h-9 w-9 place-items-center rounded-lg border border-[#9b7466]/20 text-[#9b7466] hover:bg-[#9b7466]/10"
                 aria-label={`Delete ${subject.name}`}
               >
@@ -2228,22 +2329,11 @@ function LoginPage({ supabase }: { supabase: SupabaseClient | null }) {
 
 function LogoMark() {
   return (
-    <div className="grid h-14 w-14 place-items-center rounded-2xl bg-[#5D866C] text-[#E6D8C3]">
-      <svg viewBox="0 0 40 40" className="h-9 w-9" fill="none">
-        <path
-          d="m7 29 8.5-16 5 8L25 9l10 20"
-          stroke="currentColor"
-          strokeWidth="2.5"
-          strokeLinejoin="round"
-        />
-        <path
-          d="m15 29 5-8 4 6 3-5 5 7"
-          stroke="currentColor"
-          strokeWidth="2.5"
-          strokeLinejoin="round"
-        />
-      </svg>
-    </div>
+    <img
+      src="/assets/st_dzikaz_logo.jpg.jpeg"
+      alt="St Dzikaz Academy"
+      className="h-16 w-16 rounded-2xl bg-white object-contain"
+    />
   )
 }
 
@@ -2506,14 +2596,15 @@ export default function App() {
 
   const renderContent = () => {
     if (active === 'Notice board')
-      return <NoticeBoard role={role} notices={notices} setNotices={setNotices} />
-    if (active === 'Calendar') return <CalendarPage />
+      return <NoticeBoard role={role} notices={notices} setNotices={setNotices} userId={authUser.id} supabase={supabase!} />
+    if (active === 'Calendar')
+      return <CalendarPage role={role} userId={authUser.id} supabase={supabase!} />
     if (active === 'Messages' && role !== 'Admin')
       return <MessagesPage role={role} userId={authUser.id} supabase={supabase!} />
     if (active === 'Marks' || active === 'My marks')
       return <MarksPage role={role} userId={authUser.id} supabase={supabase!} />
     if (role === 'Instructor' && active === 'My subjects')
-      return <SubjectsPage subjects={subjects} setSubjects={setSubjects} />
+      return <SubjectsPage subjects={subjects} setSubjects={setSubjects} userId={authUser.id} supabase={supabase!} />
     if (active !== 'Overview') return <PlaceholderPage role={role} active={active} />
     return role === 'Learner' ? (
       <LearnerDashboard />
