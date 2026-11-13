@@ -1,0 +1,156 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap');
+@import 'tailwindcss';
+
+@layer base {
+  :root {
+    font-family: 'DM Sans', sans-serif;
+    color: #284633;
+    background: #f5f5f0;
+    font-synthesis: none;
+  }
+
+  body {
+    min-width: 320px;
+    min-height: 100vh;
+  }
+
+  button,
+  label:has(input[type='file']) {
+    cursor: pointer;
+  }
+
+  ::selection {
+    background: #c2a68c;
+    color: #284633;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: 'Manrope', sans-serif;
+  }
+
+  .card {
+    border: 1px solid rgb(49 83 61 / 0.09);
+    border-radius: 1rem;
+    background: white;
+    box-shadow:
+      0 1px 1px rgb(49 83 61 / 0.02),
+      0 7px 24px rgb(49 83 61 / 0.035);
+  }
+
+  .form-input {
+    width: 100%;
+    border: 1px solid rgb(49 83 61 / 0.14);
+    border-radius: 0.75rem;
+    background: white;
+    padding: 0.75rem 0.875rem;
+    color: #284633;
+    font-size: 0.8125rem;
+    outline: none;
+    transition:
+      border-color 150ms,
+      box-shadow 150ms;
+  }
+
+  .form-input:focus {
+    border-color: #5d866c;
+    box-shadow: 0 0 0 3px rgb(93 134 108 / 0.12);
+  }
+
+  .primary-button,
+  .secondary-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    border-radius: 0.65rem;
+    padding: 0.65rem 1rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    transition:
+      background-color 150ms,
+      transform 150ms;
+  }
+
+  .primary-button {
+    background: #5d866c;
+    color: white;
+  }
+
+  .primary-button:hover {
+    background: #4d765c;
+    transform: translateY(-1px);
+  }
+
+  .secondary-button {
+    border: 1px solid rgb(49 83 61 / 0.13);
+    background: white;
+    color: #5d866c;
+  }
+
+  .secondary-button:hover {
+    background: #f5f5f0;
+  }
+
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: grid;
+    place-items: center;
+    overflow-y: auto;
+    background: rgb(28 48 35 / 0.68);
+    padding: 1rem;
+    backdrop-filter: blur(7px);
+  }
+
+  .modal-card {
+    width: 100%;
+    border: 1px solid rgb(255 255 255 / 0.15);
+    border-radius: 1.25rem;
+    background: #fff;
+    padding: 1.5rem;
+    box-shadow: 0 28px 80px rgb(24 45 31 / 0.3);
+  }
+}
+
+.figma-custom-code-fragment {
+  display: contents;
+}
+
+.figma-bypass-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 2147483647;
+  transform: translateY(-150%);
+  border-radius: 6px;
+  background: #111827;
+  color: #fff;
+  padding: 8px 12px;
+  font:
+    600 14px/1.2 system-ui,
+    sans-serif;
+  text-decoration: none;
+}
+
+.figma-bypass-link:focus {
+  transform: translateY(0);
+}
+
+@media (max-width: 520px) {
+  .role-switch {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
