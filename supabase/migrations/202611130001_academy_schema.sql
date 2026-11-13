@@ -137,7 +137,7 @@ begin
     new.id,
     requested_username,
     coalesce(nullif(trim(new.raw_user_meta_data ->> 'full_name'), ''), requested_username),
-    coalesce((new.raw_user_meta_data ->> 'requires_password_change')::boolean, false)
+    (new.raw_user_meta_data ->> 'requires_password_change') = 'true'
   );
   return new;
 end;

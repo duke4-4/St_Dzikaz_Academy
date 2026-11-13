@@ -2158,6 +2158,11 @@ function Field({ label, wide, children }: { label: string; wide?: boolean; child
   )
 }
 
+function registrationLoginEmail(identifier: string) {
+  const registration = identifier.trim().toLowerCase().replace(/[^a-z0-9]/g, '')
+  return registration ? `student+${registration}@login.dzikaz.ac.zw` : ''
+}
+
 function LoginPage({ supabase }: { supabase: SupabaseClient | null }) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [username, setUsername] = useState('')
@@ -2192,8 +2197,14 @@ function LoginPage({ supabase }: { supabase: SupabaseClient | null }) {
         setMessage('Account created. Check your email to confirm your address, then sign in.')
         setMode('signin')
       } else {
+        const identifier = email.trim()
+        const authEmail = identifier.includes('@') ? identifier : registrationLoginEmail(identifier)
+        if (!authEmail) {
+          setError('Enter your email address or registration number.')
+          return
+        }
         const { error: signInError } = await supabase.auth.signInWithPassword({
-          email: email.trim(),
+          email: authEmail,
           password,
         })
         if (signInError) throw signInError
@@ -2267,15 +2278,15 @@ function LoginPage({ supabase }: { supabase: SupabaseClient | null }) {
                 </Field>
               </>
             )}
-            <Field label="Email address">
+            <Field label={mode === 'signin' ? 'Email address or registration number' : 'Email address'}>
             <input
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               className="form-input"
-              type="email"
-              autoComplete="email"
+              type={mode === 'signin' ? 'text' : 'email'}
+              autoComplete={mode === 'signin' ? 'username' : 'email'}
               required
-              placeholder="you@school.co.zw"
+              placeholder={mode === 'signin' ? 'you@school.co.zw or your registration number' : 'you@school.co.zw'}
             />
           </Field>
           <Field label="Password">
@@ -2323,6 +2334,61 @@ function LoginPage({ supabase }: { supabase: SupabaseClient | null }) {
           </p>
         </div>
       </section>
+    </main>
+  )
+}
+
+function PasswordChangePage({
+  supabase,
+  onComplete,
+}: {
+  supabase: SupabaseClient
+  onComplete: () => void
+}) {
+  const [password, setPassword] = useState('')
+  const [confirmation, setConfirmation] = useState('')
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    setError('')
+    if (password.length < 8) {
+      setError('Use a password with at least 8 characters.')
+      return
+    }
+    if (password !== confirmation) {
+      setError('The passwords do not match.')
+      return
+    }
+    setSaving(true)
+    const { error: updateError } = await supabase.auth.updateUser({ password })
+    setSaving(false)
+    if (updateError) setError(updateError.message)
+    else onComplete()
+  }
+
+  return (
+    <main className="grid min-h-screen place-items-center bg-[#F5F5F0] px-5 py-12">
+      <form onSubmit={submit} className="card w-full max-w-md p-7 sm:p-9">
+        <div className="flex justify-center"><LogoMark /></div>
+        <h1 className="font-display mt-6 text-center text-2xl font-bold">Set a new password</h1>
+        <p className="mt-2 text-center text-sm leading-6 text-[#789083]">
+          For your security, choose a new password before continuing to Dzikaz Academy.
+        </p>
+        <div className="mt-6 space-y-4">
+          <Field label="New password">
+            <input className="form-input" type="password" autoComplete="new-password" minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} />
+          </Field>
+          <Field label="Confirm new password">
+            <input className="form-input" type="password" autoComplete="new-password" minLength={8} required value={confirmation} onChange={(event) => setConfirmation(event.target.value)} />
+          </Field>
+          {error && <p role="alert" className="rounded-lg bg-[#9b7466]/10 p-3 text-xs text-[#8a5548]">{error}</p>}
+          <button disabled={saving} className="primary-button w-full py-3.5 disabled:opacity-60">
+            {saving ? 'Saving…' : 'Update password'}
+          </button>
+        </div>
+      </form>
     </main>
   )
 }
