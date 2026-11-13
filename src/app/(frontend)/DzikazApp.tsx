@@ -1182,30 +1182,66 @@ function NoticeBoard({
   role,
   notices,
   setNotices,
+  userId,
+  supabase,
 }: {
   role: Role
   notices: Notice[]
   setNotices: (items: Notice[]) => void
+  userId: string
+  supabase: SupabaseClient
 }) {
   const [showForm, setShowForm] = useState(false)
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [audience, setAudience] = useState<Notice['audience']>('Everyone')
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let active = true
+    const loadNotices = async () => {
+      const { data, error: queryError } = await supabase
+        .from('notices')
+        .select('id, title, body, audience, created_at')
+        .order('created_at', { ascending: false })
+      if (!active) return
+      if (queryError) {
+        setError(queryError.message)
+        return
+      }
+      setNotices((data ?? []).map((notice) => ({
+        ...notice,
+        audience: notice.audience === 'everyone' ? 'Everyone' : notice.audience[0].toUpperCase() + notice.audience.slice(1),
+        date: new Date(notice.created_at).toLocaleDateString(),
+      })))
+    }
+    void loadNotices()
+    return () => { active = false }
+  }, [setNotices, supabase])
   const visible = notices.filter((item) => item.audience === 'Everyone' || item.audience === role)
 
-  const submit = (event: FormEvent) => {
+  const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (!title.trim() || !body.trim()) return
-    setNotices([
-      {
-        id: crypto.randomUUID(),
+    setError('')
+    const { data, error: insertError } = await supabase
+      .from('notices')
+      .insert({
         title: title.trim(),
         body: body.trim(),
-        audience,
-        date: 'Just now',
-      },
-      ...notices,
-    ])
+        audience: audience.toLowerCase(),
+        created_by: userId,
+      })
+      .select('id, title, body, audience, created_at')
+      .single()
+    if (insertError) {
+      setError(insertError.message)
+      return
+    }
+    setNotices([{
+      ...data,
+      audience: data.audience === 'everyone' ? 'Everyone' : data.audience[0].toUpperCase() + data.audience.slice(1),
+      date: 'Just now',
+    }, ...notices])
     setTitle('')
     setBody('')
     setShowForm(false)
@@ -1216,9 +1252,10 @@ function NoticeBoard({
       eyebrow="Academy updates"
       title="Notice board"
       subtitle="Important announcements for the Dzikaz learning community."
-      action={role === 'Admin' ? '+ Add notice' : undefined}
-      onAction={role === 'Admin' ? () => setShowForm(true) : undefined}
+      action={role !== 'Learner' ? '+ Add notice' : undefined}
+      onAction={role !== 'Learner' ? () => setShowForm(true) : undefined}
     >
+      {error && <p role="alert" className="mb-4 rounded-lg bg-[#9b7466]/10 p-3 text-sm text-[#8a5548]">{error}</p>}
       {showForm && (
         <form onSubmit={submit} className="card mb-6 grid gap-4 p-5 md:grid-cols-2">
           <div className="md:col-span-2 flex items-center justify-between">
@@ -1290,7 +1327,11 @@ function NoticeBoard({
             </div>
             {role === 'Admin' && (
               <button
-                onClick={() => setNotices(notices.filter((item) => item.id !== notice.id))}
+                onClick={async () => {
+                  const { error: deleteError } = await supabase.from('notices').delete().eq('id', notice.id)
+                  if (deleteError) setError(deleteError.message)
+                  else setNotices(notices.filter((item) => item.id !== notice.id))
+                }}
                 aria-label={`Delete ${notice.title}`}
                 className="h-9 w-9 shrink-0 rounded-lg text-[#9b7466] hover:bg-[#9b7466]/10"
               >
