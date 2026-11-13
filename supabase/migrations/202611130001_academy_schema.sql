@@ -115,7 +115,9 @@ as $$
 declare
   requested_username text := new.raw_user_meta_data ->> 'username';
 begin
-  if requested_username is null or requested_username !~ '^[A-Za-z0-9_]{3,30}$' then
+  if requested_username is null then
+    requested_username := 'user_' || replace(substr(new.id::text, 1, 12), '-', '');
+  elsif requested_username !~ '^[A-Za-z0-9_]{3,30}$' then
     raise exception 'Username must be 3 to 30 letters, numbers, or underscores';
   end if;
 
@@ -150,7 +152,8 @@ grant select, insert, update, delete on public.events to authenticated;
 grant select, insert, update, delete on public.notices to authenticated;
 grant select, insert, update, delete on public.marks to authenticated;
 grant select, insert, delete on public.conversations to authenticated;
-grant select, insert, update on public.messages to authenticated;
+grant select, insert on public.messages to authenticated;
+grant update (read_at) on public.messages to authenticated;
 
 create policy "Users can read permitted profiles"
   on public.profiles for select to authenticated
@@ -324,8 +327,18 @@ create policy "Mark authors and admins can update marks"
     or (select public.current_academy_role()) = 'admin'
   )
   with check (
-    recorded_by = (select auth.uid())
-    or (select public.current_academy_role()) = 'admin'
+    (select public.current_academy_role()) = 'admin'
+    or (
+      recorded_by = (select auth.uid())
+      and (select public.current_academy_role()) = 'instructor'
+      and exists (
+        select 1 from public.subjects s
+        join public.enrollments e on e.subject_id = s.id
+        where s.id = marks.subject_id
+          and s.instructor_id = (select auth.uid())
+          and e.learner_id = marks.learner_id
+      )
+    )
   );
 create policy "Mark authors and admins can delete marks"
   on public.marks for delete to authenticated
