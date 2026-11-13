@@ -421,7 +421,9 @@ function Header({
         onSubmit={(event) => {
           event.preventDefault()
           const query = search.toLowerCase()
-          if (query.includes('notice')) onNavigate('Notice board')
+          if (query.includes('message')) onNavigate('Messages')
+          else if (query.includes('mark')) onNavigate(role === 'Learner' ? 'My marks' : 'Marks')
+          else if (query.includes('notice')) onNavigate('Notice board')
           else if (query.includes('calendar') || query.includes('event')) onNavigate('Calendar')
           else if (role === 'Instructor' && (query.includes('subject') || query.includes('course')))
             onNavigate('My subjects')
@@ -2413,10 +2415,11 @@ function ProfileModal({
   open: boolean
   profile: Profile
   onClose: () => void
-  onSave: (profile: Profile) => void
+  onSave: (profile: Profile) => Promise<string | undefined>
   onSwitch: () => void
 }) {
   const [draft, setDraft] = useState(profile)
+  const [error, setError] = useState('')
   useEffect(() => setDraft(profile), [profile, open])
   if (!open) return null
   const upload = (file?: File) => {
@@ -2429,9 +2432,12 @@ function ProfileModal({
   return (
     <div className="modal-backdrop">
       <form
-        onSubmit={(e) => {
+        onSubmit={async (e) => {
           e.preventDefault()
-          onSave(draft)
+          setError('')
+          const saveError = await onSave(draft)
+          if (saveError) setError(saveError)
+          else onClose()
         }}
         className="modal-card max-w-xl"
       >
@@ -2468,13 +2474,12 @@ function ProfileModal({
               required
             />
           </Field>
-          <Field label="Email address">
+          <Field label="Sign-in identifier">
             <input
               className="form-input"
-              type="email"
+              type="text"
               value={draft.email}
-              onChange={(e) => setDraft({ ...draft, email: e.target.value })}
-              required
+              readOnly
             />
           </Field>
           <Field label="School / organisation">
@@ -2492,9 +2497,10 @@ function ProfileModal({
             />
           </Field>
         </div>
+        {error && <p role="alert" className="mt-4 rounded-lg bg-[#9b7466]/10 p-3 text-xs text-[#8a5548]">{error}</p>}
         <div className="mt-6 flex flex-wrap justify-between gap-2">
           <button type="button" onClick={onSwitch} className="text-xs font-bold text-[#5D866C]">
-            Switch account
+            Sign out
           </button>
           <div className="flex gap-2">
             <button type="button" onClick={onClose} className="secondary-button">
@@ -2513,6 +2519,7 @@ export default function App() {
   const [authUser, setAuthUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [profileReady, setProfileReady] = useState(false)
+  const [requiresPasswordChange, setRequiresPasswordChange] = useState(false)
   const [authError, setAuthError] = useState('')
   const [role, setRole] = useState<Role>('Learner')
   const [active, setActive] = useState('Overview')
@@ -2537,6 +2544,7 @@ export default function App() {
       setAuthUser(session?.user ?? null)
       setAuthLoading(false)
       setProfileReady(!session)
+      if (!session) setRequiresPasswordChange(false)
     })
 
     supabase.auth.getSession().then(({ data, error }) => {
@@ -2545,6 +2553,7 @@ export default function App() {
       setAuthUser(data.session?.user ?? null)
       setAuthLoading(false)
       setProfileReady(!data.session)
+      if (!data.session) setRequiresPasswordChange(false)
     })
 
     return () => {
@@ -2560,7 +2569,7 @@ export default function App() {
     const loadProfile = async () => {
       const { data, error } = await supabase
         .from('profiles')
-        .select('username, full_name, role, school, phone')
+        .select('username, full_name, role, school, phone, requires_password_change')
         .eq('id', authUser.id)
         .single()
 
@@ -2587,17 +2596,35 @@ export default function App() {
         return
       }
 
+      const { data: studentDetails, error: detailsError } = nextRole === 'Learner'
+        ? await supabase
+            .from('student_details')
+            .select('contact_number')
+            .eq('profile_id', authUser.id)
+            .maybeSingle()
+        : { data: null, error: null }
+      if (detailsError) {
+        setAuthError(`Could not load your student details: ${detailsError.message}`)
+        const { error: signOutError } = await supabase.auth.signOut()
+        if (signOutError) setAuthError(`${detailsError.message} Sign-out failed: ${signOutError.message}`)
+        setProfileReady(true)
+        return
+      }
+
       setAuthError('')
       setRole(nextRole)
       setActive('Overview')
+      setRequiresPasswordChange(data.requires_password_change === true)
       setProfiles((current) => ({
         ...current,
         [nextRole]: {
           ...current[nextRole],
           name: data.full_name || data.username,
-          email: authUser.email ?? '',
+          email: authUser.email?.endsWith('@login.dzikaz.ac.zw')
+            ? 'Registration number and password'
+            : authUser.email ?? '',
           school: data.school,
-          phone: data.phone,
+          phone: nextRole === 'Learner' ? studentDetails?.contact_number ?? '' : data.phone,
         },
       }))
       setProfileReady(true)
@@ -2647,7 +2674,7 @@ export default function App() {
     )
   }
 
-  if (!authUser || !profileReady) {
+  if (!authUser || !profileReady || !supabase) {
     return (
       <>
         {authError && (
@@ -2660,17 +2687,21 @@ export default function App() {
     )
   }
 
+  if (requiresPasswordChange) {
+    return <PasswordChangePage supabase={supabase} onComplete={() => setRequiresPasswordChange(false)} />
+  }
+
   const renderContent = () => {
     if (active === 'Notice board')
-      return <NoticeBoard role={role} notices={notices} setNotices={setNotices} userId={authUser.id} supabase={supabase!} />
+      return <NoticeBoard role={role} notices={notices} setNotices={setNotices} userId={authUser.id} supabase={supabase} />
     if (active === 'Calendar')
-      return <CalendarPage role={role} userId={authUser.id} supabase={supabase!} />
+      return <CalendarPage role={role} userId={authUser.id} supabase={supabase} />
     if (active === 'Messages' && role !== 'Admin')
-      return <MessagesPage role={role} userId={authUser.id} supabase={supabase!} />
+      return <MessagesPage role={role} userId={authUser.id} supabase={supabase} />
     if (active === 'Marks' || active === 'My marks')
-      return <MarksPage role={role} userId={authUser.id} supabase={supabase!} />
+      return <MarksPage role={role} userId={authUser.id} supabase={supabase} />
     if (role === 'Instructor' && active === 'My subjects')
-      return <SubjectsPage subjects={subjects} setSubjects={setSubjects} userId={authUser.id} supabase={supabase!} />
+      return <SubjectsPage subjects={subjects} setSubjects={setSubjects} userId={authUser.id} supabase={supabase} />
     if (active !== 'Overview') return <PlaceholderPage role={role} active={active} />
     return role === 'Learner' ? (
       <LearnerDashboard />
@@ -2699,12 +2730,12 @@ export default function App() {
         />
         {renderContent()}
       </div>
-      <nav className="fixed inset-x-3 bottom-3 z-30 flex justify-around rounded-2xl border border-[#31533d]/10 bg-white/95 p-2 shadow-xl backdrop-blur lg:hidden">
-        {navByRole[role].slice(0, 4).map((item) => (
+      <nav className="fixed inset-x-3 bottom-3 z-30 flex justify-start gap-1 overflow-x-auto rounded-2xl border border-[#31533d]/10 bg-white/95 p-2 shadow-xl backdrop-blur lg:hidden">
+        {navByRole[role].map((item) => (
           <button
             key={item.label}
             onClick={() => setActive(item.label)}
-            className={`flex min-w-14 flex-col items-center gap-1 rounded-xl px-2 py-2 text-[9px] font-bold ${active === item.label ? 'bg-[#5D866C] text-white' : 'text-[#789083]'}`}
+            className={`flex min-w-[58px] shrink-0 flex-col items-center gap-1 rounded-xl px-2 py-2 text-[9px] font-bold ${active === item.label ? 'bg-[#5D866C] text-white' : 'text-[#789083]'}`}
           >
             <Icon name={item.icon} size={17} />
             <span className="max-w-16 truncate">{item.label}</span>
@@ -2715,9 +2746,25 @@ export default function App() {
         open={profileOpen}
         profile={profiles[role]}
         onClose={() => setProfileOpen(false)}
-        onSave={(profile) => {
-          setProfiles({ ...profiles, [role]: profile })
-          setProfileOpen(false)
+        onSave={async (profile) => {
+          const { error: profileError } = await supabase
+            .from('profiles')
+            .update({
+              full_name: profile.name.trim(),
+              school: profile.school.trim(),
+              ...(role === 'Learner' ? {} : { phone: profile.phone.trim() }),
+            })
+            .eq('id', authUser.id)
+          if (profileError) return profileError.message
+          if (role === 'Learner') {
+            const { error: detailsError } = await supabase
+              .from('student_details')
+              .update({ contact_number: profile.phone.trim() })
+              .eq('profile_id', authUser.id)
+            if (detailsError) return detailsError.message
+          }
+          setProfiles((current) => ({ ...current, [role]: profile }))
+          return undefined
         }}
         onSwitch={() => {
           setProfileOpen(false)

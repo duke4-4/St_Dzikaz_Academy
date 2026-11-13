@@ -1,44 +1,55 @@
 # Dzikaz Academy
 
-Next.js learning platform with Supabase Authentication and Postgres-backed learner marks and teacher/learner conversations. The initial Supabase database schema, constraints, and row-level security policies are in `supabase/migrations`.
+Next.js learning platform with Supabase Authentication and Postgres. Events, notices, subjects, marks, and private instructor/learner conversations use the schema and row-level security policies in `supabase/migrations`.
 
-## Run locally
+## Local setup
 
-1. Install Node.js 24.22.1 or later and pnpm.
-2. Install dependencies with `pnpm install`.
-3. Copy `.env.example` to `.env.local` and set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` from the Supabase project's API settings.
-4. Apply the migration below, then start the app with `pnpm dev`.
+1. Install Node.js 24.22.1 or later and pnpm 10.11.0.
+2. Run `pnpm install`.
+3. Copy `.env.example` to `.env.local` and set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` from Supabase project settings.
+4. Initialize/link the Supabase CLI to your project, then apply the schema with `supabase db push`.
+5. Set the Supabase Auth site URL and redirect allowlist to your local and deployed app URLs.
+6. Run `pnpm dev`.
 
-Only the Supabase project URL and publishable anon key belong in `.env.local`. Never expose a service-role key in a `NEXT_PUBLIC_*` variable or browser code.
+The browser only uses the Supabase URL and publishable anon key. Never expose a Supabase service-role key in `NEXT_PUBLIC_*`, the repository, or Vercel.
 
-## Set up Supabase
-
-1. Create a Supabase project.
-2. From the project root, authenticate and link the Supabase CLI to that project, then run `supabase db push`.
-3. In Supabase Authentication settings, configure the site URL and allowed redirect URLs for the local and deployed app.
-4. Enable email confirmation if required by your academy.
-5. Add the project URL and publishable anon key to `.env.local`, then restart the Next.js server.
-
-The migration creates:
+## Supabase schema
 
 | Table | Purpose |
 | --- | --- |
-| `profiles` | Academy username, display name, role, school, and contact details for each Supabase Auth account. Passwords are stored and verified by Supabase Auth, never in this table. |
-| `subjects` | Subjects, syllabus codes, levels, and their instructor. |
-| `enrollments` | Learner membership in subjects. |
-| `events` | Scheduled academy events and audience. |
-| `notices` | Academy announcements and audience. |
-| `marks` | Assessment scores, maximum score, date, feedback, learner, subject, and recording instructor. |
-| `conversations` | A private learner/instructor thread for an enrolled subject. |
-| `messages` | Messages within a conversation, with sender, timestamp, and read status. |
+| `profiles` | Supabase Auth user profile, unique username, academy role, and first-login password change flag. Supabase Auth handles passwords; they are never stored in this table. |
+| `student_details` | Private registration number, class, date of birth, contact number, academic year, and gender imported from the workbook. Visible only to the student and administrators. |
+| `subjects` | ZIMSEC subjects, level, syllabus code, and instructor. |
+| `enrollments` | Learners enrolled in subjects. |
+| `events` | Scheduled events, audience, and venue. |
+| `notices` | Announcements and audience. |
+| `marks` | Student assessment scores, maximum score, date, feedback, subject, and recording instructor. |
+| `conversations` | Private learner/instructor conversation scoped to an enrolled subject. |
+| `messages` | Messages and read status within a conversation. |
 
-Row-level security restricts profile visibility, subject and notice management, marks, and messages by role and relationship. The `on_auth_user_created` trigger creates a learner profile when a user signs up. A generated username is used only when an account is created without username metadata (for example, through the Supabase dashboard); users can change their username in `profiles`.
+The migration creates the Auth profile trigger and role-based RLS policies. `supabase db push` requires the Supabase CLI; if needed, run `supabase init`, `supabase login`, and `supabase link --project-ref <project-ref>` first. Keep the existing migration file when initializing.
 
-## Accounts and roles
+## Import student accounts
 
-Learners can register from the full-screen sign-in page with a username, name, email, and password. Sign-in uses Supabase Auth and the app loads the user's role from `profiles`; roles cannot be selected or changed in the client. Passwords are managed only by Supabase Auth.
+The student workbook is kept under the ignored `private-imports/` folder, never under `public/`; that folder is excluded from Git and Vercel deployments. The importer validates locally by default and does not send anything to Supabase:
 
-Instructor and admin accounts should be created/invited by an authorized project administrator through Supabase Auth. To grant a role, use the Supabase SQL editor as the project owner:
+```powershell
+python scripts/import_students.py
+```
+
+After applying the migration, set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` only in the local PowerShell session, then explicitly run the import:
+
+```powershell
+$env:SUPABASE_URL = "https://your-project.supabase.co"
+$env:SUPABASE_SERVICE_ROLE_KEY = "your-service-role-key"
+python scripts/import_students.py --apply
+```
+
+The importer reads `NAME`, `SURNAME`, `CLASS`, `DOB`, `NUMBER`, `YEAR`, `GENDER`, `REG`, and `PASSWORD` from all workbook sheets. It creates confirmed Supabase Auth accounts with synthetic sign-in emails; students sign in with their **registration number and password**. Passwords are sent only to Supabase Auth, which stores password hashes. Accounts are required to choose a new password at first sign-in. Missing or shorter-than-six-character workbook passwords are replaced with random one-time passwords; those credentials are written only to `private-imports/generated-student-passwords.csv`. Keep that file private and securely delete it after distributing the credentials. Do not set Supabase's minimum password length above six until all imported temporary credentials have been used; the app requires at least eight characters for new or changed passwords.
+
+## Roles
+
+New self-registrations receive the learner role. Create/invite instructor or administrator accounts through Supabase Auth, then assign the profile role using the Supabase SQL editor as project owner:
 
 ```sql
 update public.profiles
@@ -46,4 +57,14 @@ set role = 'instructor'
 where username = 'instructor_username';
 ```
 
-Use `admin` instead of `instructor` only for a trusted academy administrator. Do not expose the Supabase service-role key to the app.
+Use the `admin` role only for trusted academy administrators. The app does not let users choose or elevate their own role.
+
+## Deploy to Vercel
+
+`vercel.json` selects the Next.js framework and the existing Payload/Next build command. Import the project into Vercel or deploy with the Vercel CLI. Use Node.js 24 and pnpm 10.11.0, then configure these environment variables for Preview and Production:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `NEXT_PUBLIC_SITE_URL` (the production app URL, recommended for canonical metadata)
+
+Apply the Supabase migration before using the deployed app. Never add the service-role key or the private student workbook to Vercel. The workbook and generated credential report are excluded from deployment.

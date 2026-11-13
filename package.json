@@ -5,13 +5,14 @@
   "type": "module",
   "packageManager": "pnpm@10.11.0",
   "scripts": {
-    "dev": "NODE_OPTIONS=--no-deprecation next dev --port ${PORT:-3000} --hostname 0.0.0.0",
-    "build": "NODE_OPTIONS=--no-deprecation payload build",
-    "start": "NODE_OPTIONS=--no-deprecation next start",
+    "dev": "next dev --port 3000 --hostname 0.0.0.0",
+    "build": "payload build",
+    "start": "next start",
     "format": "oxfmt",
-    "generate:importmap": "NODE_OPTIONS=--no-deprecation payload generate:importmap",
-    "generate:types": "NODE_OPTIONS=--no-deprecation payload generate:types",
-    "payload": "NODE_OPTIONS=--no-deprecation payload"
+    "generate:importmap": "payload generate:importmap",
+    "generate:types": "payload generate:types",
+    "import:students": "python scripts/import_students.py",
+    "payload": "payload"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.0",

@@ -18,7 +18,7 @@ create table public.profiles (
 
 create table public.student_details (
   profile_id uuid primary key references public.profiles (id) on delete cascade,
-  registration_number text not null unique,
+  registration_number text unique,
   class_name text not null default '',
   date_of_birth date,
   contact_number text not null default '',
@@ -139,6 +139,9 @@ begin
     coalesce(nullif(trim(new.raw_user_meta_data ->> 'full_name'), ''), requested_username),
     (new.raw_user_meta_data ->> 'requires_password_change') = 'true'
   );
+  insert into public.student_details (profile_id)
+  select new.id
+  where coalesce((new.raw_app_meta_data ->> 'role'), 'learner') = 'learner';
   return new;
 end;
 $$;
@@ -158,6 +161,39 @@ begin
   return new;
 end;
 $$;
+
+create function public.lookup_subject_profiles(requested_ids uuid[])
+returns table (id uuid, username text, full_name text)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select p.id, p.username, p.full_name
+  from public.profiles p
+  where p.id = any(coalesce(requested_ids, '{}'::uuid[]))
+    and (
+      p.id = (select auth.uid())
+      or (select public.current_academy_role()) = 'admin'
+      or exists (
+        select 1
+        from public.enrollments e
+        join public.subjects s on s.id = e.subject_id
+        where e.learner_id = (select auth.uid())
+          and s.instructor_id = p.id
+      )
+      or exists (
+        select 1
+        from public.enrollments e
+        join public.subjects s on s.id = e.subject_id
+        where e.learner_id = p.id
+          and s.instructor_id = (select auth.uid())
+      )
+    )
+$$;
+
+revoke all on function public.lookup_subject_profiles(uuid[]) from public, anon;
+grant execute on function public.lookup_subject_profiles(uuid[]) to authenticated;
 
 create trigger on_auth_user_created
   after insert on auth.users
@@ -180,6 +216,7 @@ alter table public.messages enable row level security;
 grant select on public.profiles to authenticated;
 grant update (username, full_name, school, phone) on public.profiles to authenticated;
 grant select on public.student_details to authenticated;
+grant update (contact_number) on public.student_details to authenticated;
 grant select, insert, update, delete on public.subjects to authenticated;
 grant select, insert, delete on public.enrollments to authenticated;
 grant select, insert, update, delete on public.events to authenticated;
@@ -194,14 +231,6 @@ create policy "Users can read permitted profiles"
   using (
     id = (select auth.uid())
     or (select public.current_academy_role()) = 'admin'
-    or exists (
-      select 1
-      from public.enrollments e
-      join public.subjects s on s.id = e.subject_id
-      where
-        (e.learner_id = (select auth.uid()) and s.instructor_id = profiles.id)
-        or (e.learner_id = profiles.id and s.instructor_id = (select auth.uid()))
-    )
   );
 
 create policy "Users can update their own profile"
@@ -215,6 +244,16 @@ create policy "Users can update their own profile"
 create policy "Students and admins can read student details"
   on public.student_details for select to authenticated
   using (
+    profile_id = (select auth.uid())
+    or (select public.current_academy_role()) = 'admin'
+  );
+create policy "Students and admins can update contact details"
+  on public.student_details for update to authenticated
+  using (
+    profile_id = (select auth.uid())
+    or (select public.current_academy_role()) = 'admin'
+  )
+  with check (
     profile_id = (select auth.uid())
     or (select public.current_academy_role()) = 'admin'
   );

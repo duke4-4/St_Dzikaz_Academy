@@ -1,10 +1,12 @@
 import argparse
+import csv
 import datetime as dt
 import hashlib
 import json
 import os
 import posixpath
 import re
+import secrets
 import sys
 import urllib.error
 import urllib.parse
@@ -16,6 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_WORKBOOK = ROOT / "private-imports" / "Databasef1.xlsx"
+GENERATED_PASSWORDS = ROOT / "private-imports" / "generated-student-passwords.csv"
 SPREADSHEET_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 OFFICE_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 PACKAGE_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
@@ -183,26 +186,43 @@ def prepare_records(records):
     prepared = []
     seen_registrations = set()
     seen_logins = set()
+    existing_generated_passwords = {}
+    if GENERATED_PASSWORDS.exists():
+        with GENERATED_PASSWORDS.open(newline="", encoding="utf-8") as file:
+            existing_generated_passwords = {
+                row["registration_number"].casefold(): row["password"]
+                for row in csv.DictReader(file)
+                if row.get("registration_number") and row.get("password")
+            }
     for record in records:
         row = record["_row_number"]
         registration = record["REG"]
         password = record["PASSWORD"]
         full_name = " ".join(part for part in (record["NAME"], record["SURNAME"]) if part).strip()
-        if not registration or not password or not full_name:
+        if not registration and not full_name and not password:
+            continue
+        if not registration or not full_name:
             raise ValueError(f"Required student data is missing from workbook row {row}.")
-        if len(password) < 8:
-            raise ValueError(f"A student password is shorter than 8 characters (workbook row {row}).")
         registration_key = registration.casefold()
         login_email = auth_email_for_registration(registration)
         if registration_key in seen_registrations or login_email.casefold() in seen_logins:
             raise ValueError(f"Duplicate student registration information was found at workbook row {row}.")
         seen_registrations.add(registration_key)
         seen_logins.add(login_email.casefold())
+        password_generated = not password or len(password) < 6
+        password_restored = False
+        if password_generated:
+            password = existing_generated_passwords.get(registration_key)
+            password_restored = password is not None
+            if not password:
+                password = secrets.token_urlsafe(18)
         prepared.append(
             {
                 "registration_number": registration,
                 "email": login_email,
                 "password": password,
+                "password_generated": password_generated,
+                "password_restored": password_restored,
                 "username": username_for_registration(registration),
                 "full_name": full_name,
                 "class_name": record["CLASS"],
@@ -258,17 +278,41 @@ def import_records(records):
         for user in users:
             email = user.get("email")
             if email:
-                existing_users[email.casefold()] = user["id"]
+                existing_users[email.casefold()] = user
         if len(users) < 1000:
             break
         page += 1
+
+    for record in records:
+        existing_user = existing_users.get(record["email"].casefold())
+        if not existing_user:
+            continue
+        if not existing_user.get("user_metadata", {}).get("registration_import"):
+            raise ValueError("A matching sign-in account already exists; review it in Supabase before importing.")
+        if record["password_generated"] and not record["password_restored"]:
+            raise ValueError("The secure generated-password file is missing for an already imported account.")
+
+    generated = [record for record in records if record["password_generated"]]
+    if generated:
+        GENERATED_PASSWORDS.parent.mkdir(parents=True, exist_ok=True)
+        with GENERATED_PASSWORDS.open("w", newline="", encoding="utf-8") as file:
+            writer = csv.DictWriter(file, fieldnames=["registration_number", "password"])
+            writer.writeheader()
+            writer.writerows(
+                {
+                    "registration_number": record["registration_number"],
+                    "password": record["password"],
+                }
+                for record in generated
+            )
 
     student_details = []
     created = 0
     existing = 0
     for record in records:
-        user_id = existing_users.get(record["email"].casefold())
-        if user_id:
+        existing_user = existing_users.get(record["email"].casefold())
+        if existing_user:
+            user_id = existing_user["id"]
             existing += 1
         else:
             user = request_supabase(
@@ -283,11 +327,12 @@ def import_records(records):
                         "username": record["username"],
                         "full_name": record["full_name"],
                         "requires_password_change": True,
+                        "registration_import": True,
                     },
                 },
             )
             user_id = user["id"]
-            existing_users[record["email"].casefold()] = user_id
+            existing_users[record["email"].casefold()] = user
             created += 1
         student_details.append(
             {
@@ -303,7 +348,7 @@ def import_records(records):
 
     request_supabase(
         "POST",
-        f"{project_url}/rest/v1/student_details?on_conflict=registration_number",
+        f"{project_url}/rest/v1/student_details?on_conflict=profile_id",
         service_key,
         student_details,
         prefer="resolution=merge-duplicates,return=minimal",
@@ -325,7 +370,9 @@ def main():
         if args.apply:
             import_records(records)
         else:
-            print(f"Validated {len(records)} student records. No accounts or data were sent to Supabase.")
+            generated_count = sum(1 for record in records if record["password_generated"])
+            print(f"Validated {len(records)} student records. {generated_count} missing/too-short passwords will be replaced with random one-time passwords.")
+            print("No accounts or data were sent to Supabase.")
             print("Review the workbook locally, then rerun with --apply to import.")
     except (OSError, KeyError, ValueError, RuntimeError, zipfile.BadZipFile) as error:
         print(f"Student import failed: {error}", file=sys.stderr)
