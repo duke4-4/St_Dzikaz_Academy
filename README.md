@@ -61,7 +61,7 @@ Use the `admin` role only for trusted academy administrators. The app does not l
 
 ## Deploy to Vercel
 
-`vercel.json` selects the Next.js framework and the existing Payload/Next build command. Import the project into Vercel or deploy with the Vercel CLI. Use Node.js 24 and pnpm 10.11.0, then configure these environment variables for Preview and Production:
+`vercel.json` selects the Next.js framework, and `pnpm run build` runs `next build`. Import the project into Vercel or deploy with the Vercel CLI. Use Node.js 24 and pnpm 10.11.0, then configure these environment variables for Preview and Production:
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`

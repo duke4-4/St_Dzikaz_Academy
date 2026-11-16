@@ -6,31 +6,17 @@
   "packageManager": "pnpm@10.11.0",
   "scripts": {
     "dev": "next dev --port 3000 --hostname 0.0.0.0",
-    "build": "payload build",
+    "build": "next build",
     "start": "next start",
     "format": "oxfmt",
-    "generate:importmap": "payload generate:importmap",
-    "generate:types": "payload generate:types",
-    "import:students": "python scripts/import_students.py",
-    "payload": "payload"
+    "import:students": "python scripts/import_students.py"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.0",
-    "@payloadcms/figma": "1.0.0-beta.1",
-    "@payloadcms/next": "4.0.0-beta.7",
-    "@payloadcms/plugin-cloud-storage": "4.0.0-beta.7",
-    "@payloadcms/plugin-mcp": "4.0.0-beta.7",
-    "@payloadcms/richtext-lexical": "4.0.0-beta.7",
-    "@payloadcms/translations": "4.0.0-beta.7",
-    "@payloadcms/ui": "4.0.0-beta.7",
-    "graphql": "^16.8.1",
     "html-react-parser": "^5.2.10",
-    "monaco-editor": "0.55.1",
     "next": "16.4.2",
-    "payload": "4.0.0-beta.7",
     "react": "19.3.1",
-    "react-dom": "19.3.1",
-    "sharp": "^0.35.4"
+    "react-dom": "19.3.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.0",

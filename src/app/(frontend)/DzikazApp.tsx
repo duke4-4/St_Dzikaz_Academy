@@ -1719,8 +1719,9 @@ function MessagesPage({ role, userId, supabase }: {
             .eq('learner_id', userId)
           if (enrollmentError) throw enrollmentError
           for (const enrollment of enrollments ?? []) {
-            const subject = enrollment.subjects
-            if (subject) subjectsByContact.set(`${subject.instructor_id}:${subject.id}`, { id: subject.id, name: subject.name })
+            for (const subject of enrollment.subjects ?? []) {
+              subjectsByContact.set(`${subject.instructor_id}:${subject.id}`, { id: subject.id, name: subject.name })
+            }
           }
         } else {
           const { data: subjects, error: subjectError } = await supabase
@@ -1751,7 +1752,15 @@ function MessagesPage({ role, userId, supabase }: {
         for (const [key, subject] of subjectsByContact) {
           const counterpartId = key.split(':')[0]
           const profile = profileById.get(counterpartId)
-          if (profile) nextContacts.push({ ...profile, subjectId: subject.id, subjectName: subject.name })
+          if (profile) {
+            nextContacts.push({
+              id: profile.id,
+              username: profile.username,
+              fullName: profile.full_name,
+              subjectId: subject.id,
+              subjectName: subject.name,
+            })
+          }
         }
 
         const participantColumn = role === 'Learner' ? 'learner_id' : 'instructor_id'
