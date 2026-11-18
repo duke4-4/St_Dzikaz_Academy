@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { SupabaseClient, User } from '@supabase/supabase-js'
 import { getSupabaseBrowserClient } from '@/lib/supabase'
 
@@ -283,11 +283,7 @@ const initialSubjects: Subject[] = [
 function Logo({ compact = false }: { compact?: boolean }) {
   return (
     <div className="flex items-center gap-3">
-      <img
-        src="/assets/st_dzikaz_logo.jpg.jpeg"
-        alt="St Dzikaz Academy"
-        className="h-10 w-10 shrink-0 rounded-xl bg-white object-contain"
-      />
+      <LogoImage className="h-10 w-10 shrink-0 rounded-xl" />
       {!compact && (
         <div>
           <div className="font-display text-lg font-bold leading-none tracking-tight">
@@ -2309,8 +2305,23 @@ function registrationLoginEmail(identifier: string) {
   return registration ? `student+${registration}@login.dzikaz.ac.zw` : ''
 }
 
-function LoginPage({ supabase }: { supabase: SupabaseClient | null }) {
+type LoginRole = 'learner' | 'instructor' | 'admin'
+
+const loginRoles: { value: LoginRole; label: string }[] = [
+  { value: 'learner', label: 'Student' },
+  { value: 'instructor', label: 'Teacher' },
+  { value: 'admin', label: 'Admin' },
+]
+
+function LoginPage({
+  supabase,
+  onRoleChange,
+}: {
+  supabase: SupabaseClient | null
+  onRoleChange: (role: LoginRole) => void
+}) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
+  const [loginRole, setLoginRole] = useState<LoginRole>('learner')
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -2342,12 +2353,22 @@ function LoginPage({ supabase }: { supabase: SupabaseClient | null }) {
         setMessage('Account created. Check your email to confirm your address, then sign in.')
         setMode('signin')
       } else {
+        onRoleChange(loginRole)
         const identifier = email.trim()
-        const authEmail = identifier.includes('@')
-          ? identifier.toLowerCase()
-          : registrationLoginEmail(identifier)
+        const authEmail =
+          loginRole === 'learner' && !identifier.includes('@')
+            ? registrationLoginEmail(identifier)
+            : identifier.toLowerCase()
         if (!authEmail) {
-          setError('Enter your email address or registration number.')
+          setError(
+            loginRole === 'learner'
+              ? 'Enter your email address or registration number.'
+              : 'Enter your email address.',
+          )
+          return
+        }
+        if (!authEmail.includes('@')) {
+          setError('Enter a valid email address.')
           return
         }
         const { error: signInError } = await supabase.auth.signInWithPassword({
@@ -2384,19 +2405,72 @@ function LoginPage({ supabase }: { supabase: SupabaseClient | null }) {
             <span className="font-display text-lg font-bold">St Dzikaz Academy</span>
           </div>
           <div className="mt-8 lg:mt-0">
+            {mode === 'signin' && (
+              <div
+                aria-label="Sign in as"
+                className="mb-7 grid grid-cols-3 rounded-xl bg-[#F5F5F0] p-1"
+                role="tablist"
+              >
+                {loginRoles.map((item) => (
+                  <button
+                    key={item.value}
+                    type="button"
+                    id={`login-tab-${item.value}`}
+                    role="tab"
+                    aria-selected={loginRole === item.value}
+                    aria-controls="login-panel"
+                    onClick={() => {
+                      setLoginRole(item.value)
+                      onRoleChange(item.value)
+                      setError('')
+                      setMessage('')
+                    }}
+                    className={`rounded-lg px-2 py-2.5 text-xs font-bold transition ${
+                      loginRole === item.value
+                        ? item.value === 'admin'
+                          ? 'bg-[#31533d] text-white shadow-sm'
+                          : 'bg-white text-[#31533d] shadow-sm'
+                        : 'text-[#789083] hover:text-[#31533d]'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
             <p className="text-[10px] font-bold uppercase tracking-[.2em] text-[#5D866C]">
               Reaching learning heights
             </p>
             <h2 className="font-display mt-2 text-3xl font-bold">
-              {mode === 'signin' ? 'Welcome back' : 'Create your learner account'}
+              {mode === 'signup'
+                ? 'Create your learner account'
+                : loginRole === 'admin'
+                  ? 'Admin sign in'
+                  : loginRole === 'instructor'
+                    ? 'Teacher sign in'
+                    : 'Welcome back'}
             </h2>
             <p className="mt-2 text-sm text-[#789083]">
-              {mode === 'signin'
-                ? 'Sign in with your academy email or registration number and password.'
-                : 'Create your learner account with your name, email address, and password.'}
+              {mode === 'signup'
+                ? 'Create your learner account with your name, email address, and password.'
+                : loginRole === 'learner'
+                  ? 'Sign in with your academy email or registration number and password.'
+                  : loginRole === 'instructor'
+                    ? 'Sign in to your teacher workspace with your email and password.'
+                    : 'Secure access for academy administrators.'}
             </p>
           </div>
-          <form onSubmit={submit} className="mt-8 space-y-4">
+          <form
+            id="login-panel"
+            role="tabpanel"
+            aria-labelledby={mode === 'signin' ? `login-tab-${loginRole}` : undefined}
+            onSubmit={submit}
+            className={`mt-8 space-y-4 ${
+              mode === 'signin' && loginRole === 'admin'
+                ? 'rounded-2xl border border-[#C2A68C]/50 bg-[#F5F5F0] p-5 shadow-sm'
+                : ''
+            }`}
+          >
             {mode === 'signup' && (
               <>
                 <Field label="Full name">
@@ -2411,15 +2485,25 @@ function LoginPage({ supabase }: { supabase: SupabaseClient | null }) {
                 </Field>
               </>
             )}
-            <Field label={mode === 'signin' ? 'Email address or registration number' : 'Email address'}>
+            <Field
+              label={
+                mode === 'signin' && loginRole === 'learner'
+                  ? 'Email address or registration number'
+                  : 'Email address'
+              }
+            >
             <input
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               className="form-input"
-              type={mode === 'signin' ? 'text' : 'email'}
+              type={mode === 'signin' && loginRole === 'learner' ? 'text' : 'email'}
               autoComplete={mode === 'signin' ? 'username' : 'email'}
               required
-              placeholder={mode === 'signin' ? 'you@school.co.zw or your registration number' : 'you@school.co.zw'}
+              placeholder={
+                mode === 'signin' && loginRole === 'learner'
+                  ? 'you@gmail.com or your registration number'
+                  : 'you@gmail.com'
+              }
             />
           </Field>
           <Field label="Password">
@@ -2453,7 +2537,12 @@ function LoginPage({ supabase }: { supabase: SupabaseClient | null }) {
             <button
               type="button"
               onClick={() => {
-                setMode(mode === 'signin' ? 'signup' : 'signin')
+                const nextMode = mode === 'signin' ? 'signup' : 'signin'
+                setMode(nextMode)
+                if (nextMode === 'signup') {
+                  setLoginRole('learner')
+                  onRoleChange('learner')
+                }
                 setError('')
                 setMessage('')
               }}
@@ -2527,12 +2616,22 @@ function PasswordChangePage({
 }
 
 function LogoMark() {
+  return <LogoImage className="h-16 w-16 rounded-2xl" />
+}
+
+function LogoImage({ className }: { className: string }) {
   return (
-    <img
-      src="/assets/st_dzikaz_logo.jpg.jpeg"
-      alt="St Dzikaz Academy"
-      className="h-16 w-16 rounded-2xl bg-white object-contain"
-    />
+    <span className={`relative block shrink-0 overflow-hidden bg-[#f8f8f5] ${className}`}>
+      <img
+        src="/assets/st_dzikaz_logo.jpg.jpeg"
+        alt="St Dzikaz Academy"
+        className="h-full w-full object-contain"
+      />
+      <span
+        aria-hidden="true"
+        className="absolute bottom-[5%] right-0 h-[11%] w-[31%] bg-[#f8f8f5]"
+      />
+    </span>
   )
 }
 
@@ -2652,6 +2751,7 @@ export default function App() {
   const [profileReady, setProfileReady] = useState(false)
   const [requiresPasswordChange, setRequiresPasswordChange] = useState(false)
   const [authError, setAuthError] = useState('')
+  const expectedLoginRole = useRef<LoginRole | null>(null)
   const [role, setRole] = useState<Role>('Learner')
   const [active, setActive] = useState('Overview')
   const [profileOpen, setProfileOpen] = useState(false)
@@ -2723,6 +2823,22 @@ export default function App() {
         setAuthError('Your account has an unsupported academy role. Contact an administrator.')
         const { error: signOutError } = await supabase.auth.signOut()
         if (signOutError) setAuthError(`Unsupported academy role. Sign-out failed: ${signOutError.message}`)
+        setProfileReady(true)
+        return
+      }
+
+      const expectedRole = expectedLoginRole.current
+      const loginRoleByDashboardRole: Record<Role, LoginRole> = {
+        Learner: 'learner',
+        Instructor: 'instructor',
+        Admin: 'admin',
+      }
+      const nextRoleValue = loginRoleByDashboardRole[nextRole]
+      if (expectedRole && nextRoleValue !== expectedRole) {
+        const roleName = loginRoles.find((item) => item.value === expectedRole)?.label
+        setAuthError(`This account is not registered as a ${roleName?.toLowerCase() ?? 'matching'} account.`)
+        const { error: signOutError } = await supabase.auth.signOut()
+        if (signOutError) setAuthError(`Account type does not match. Sign-out failed: ${signOutError.message}`)
         setProfileReady(true)
         return
       }
@@ -2813,7 +2929,13 @@ export default function App() {
             {authError}
           </div>
         )}
-        <LoginPage supabase={supabase} />
+        <LoginPage
+          supabase={supabase}
+          onRoleChange={(nextRole) => {
+            expectedLoginRole.current = nextRole
+            setAuthError('')
+          }}
+        />
       </>
     )
   }
