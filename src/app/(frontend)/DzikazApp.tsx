@@ -246,13 +246,13 @@ const profileDefaults: Record<Role, Profile> = {
   Instructor: {
     name: 'Caleb Kunda',
     email: 'caleb@dzikaz.ac.zw',
-    school: 'Dzikaz Academy',
+    school: 'St Dzikaz Academy',
     phone: '+263 71 820 4412',
   },
   Admin: {
     name: 'Tina Ncube',
     email: 'tina@dzikaz.ac.zw',
-    school: 'Dzikaz Academy',
+    school: 'St Dzikaz Academy',
     phone: '+263 78 106 9023',
   },
 }
@@ -291,7 +291,7 @@ function Logo({ compact = false }: { compact?: boolean }) {
       {!compact && (
         <div>
           <div className="font-display text-lg font-bold leading-none tracking-tight">
-            Dzikaz Academy
+            St Dzikaz Academy
           </div>
           <div className="mt-1 text-[10px] uppercase tracking-[.18em] text-white/55">
             Reaching learning heights
@@ -415,7 +415,7 @@ function Header({
     <header className="sticky top-0 z-30 flex h-[76px] items-center justify-between border-b border-[#31533d]/10 bg-[#F5F5F0]/90 px-5 backdrop-blur-md md:px-8">
       <div className="flex items-center gap-3 lg:hidden">
         <Logo compact />
-        <span className="font-display font-bold text-[#31533d]">Dzikaz</span>
+        <span className="font-display font-bold text-[#31533d]">St Dzikaz</span>
       </div>
       <form
         onSubmit={(event) => {
@@ -950,6 +950,141 @@ function AdminDashboard() {
   )
 }
 
+function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
+  const [fullName, setFullName] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [role, setRole] = useState<'learner' | 'instructor' | 'admin'>('learner')
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const addUser = async (event: FormEvent) => {
+    event.preventDefault()
+    setError('')
+    setMessage('')
+
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+    if (sessionError) {
+      setError(`Could not verify your session: ${sessionError.message}`)
+      return
+    }
+    if (!session) {
+      setError('Your session expired. Sign in again before adding a user.')
+      return
+    }
+
+    setSaving(true)
+    try {
+      const response = await fetch('/api/admin/users/', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ fullName, email, password, role }),
+      })
+      const result: unknown = await response.json()
+      if (!response.ok) {
+        const errorMessage =
+          typeof result === 'object' &&
+          result !== null &&
+          'error' in result &&
+          typeof result.error === 'string'
+            ? result.error
+            : 'Could not create the account.'
+        throw new Error(errorMessage)
+      }
+
+      setMessage(
+        `Account created for ${email.trim()}. Share the temporary password securely; the user must change it after signing in.`,
+      )
+      setFullName('')
+      setEmail('')
+      setPassword('')
+      setRole('learner')
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error ? requestError.message : 'Could not create the account.',
+      )
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <DashboardFrame
+      eyebrow="Admin dashboard"
+      title="User management"
+      subtitle="Create a learner, instructor, or administrator account."
+    >
+      <form onSubmit={addUser} className="card max-w-2xl space-y-5 p-6">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Full name">
+            <input
+              className="form-input"
+              autoComplete="name"
+              value={fullName}
+              onChange={(event) => setFullName(event.target.value)}
+              maxLength={120}
+              required
+            />
+          </Field>
+          <Field label="Email address">
+            <input
+              className="form-input"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              maxLength={254}
+              required
+              placeholder="name@gmail.com"
+            />
+          </Field>
+          <Field label="Temporary password">
+            <input
+              className="form-input"
+              type="password"
+              autoComplete="new-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              minLength={8}
+              required
+            />
+          </Field>
+          <Field label="Academy role">
+            <select
+              className="form-input"
+              value={role}
+              onChange={(event) =>
+                setRole(event.target.value as 'learner' | 'instructor' | 'admin')
+              }
+            >
+              <option value="learner">Learner</option>
+              <option value="instructor">Instructor</option>
+              <option value="admin">Admin</option>
+            </select>
+          </Field>
+        </div>
+        {error && (
+          <p role="alert" className="rounded-lg bg-[#9b7466]/10 p-3 text-xs text-[#8a5548]">
+            {error}
+          </p>
+        )}
+        {message && (
+          <p role="status" className="rounded-lg bg-[#5D866C]/10 p-3 text-xs text-[#31533d]">
+            {message}
+          </p>
+        )}
+        <button disabled={saving} className="primary-button disabled:opacity-60">
+          {saving ? 'Creating account…' : 'Add user'}
+        </button>
+      </form>
+    </DashboardFrame>
+  )
+}
+
 function DashboardFrame({
   eyebrow,
   title,
@@ -1312,7 +1447,7 @@ function NoticeBoard({
               </div>
               <p className="mt-2 text-sm leading-6 text-[#718078]">{notice.body}</p>
               <p className="mt-3 text-[10px] font-semibold text-[#9aa49e]">
-                {notice.date} · Dzikaz Academy
+                {notice.date} · St Dzikaz Academy
               </p>
             </div>
             {role === 'Admin' && (
@@ -2176,7 +2311,6 @@ function registrationLoginEmail(identifier: string) {
 
 function LoginPage({ supabase }: { supabase: SupabaseClient | null }) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
-  const [username, setUsername] = useState('')
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -2200,16 +2334,18 @@ function LoginPage({ supabase }: { supabase: SupabaseClient | null }) {
     try {
       if (mode === 'signup') {
         const { error: signUpError } = await supabase.auth.signUp({
-          email: email.trim(),
+          email: email.trim().toLowerCase(),
           password,
-          options: { data: { username: username.trim(), full_name: fullName.trim() } },
+          options: { data: { full_name: fullName.trim() } },
         })
         if (signUpError) throw signUpError
         setMessage('Account created. Check your email to confirm your address, then sign in.')
         setMode('signin')
       } else {
         const identifier = email.trim()
-        const authEmail = identifier.includes('@') ? identifier : registrationLoginEmail(identifier)
+        const authEmail = identifier.includes('@')
+          ? identifier.toLowerCase()
+          : registrationLoginEmail(identifier)
         if (!authEmail) {
           setError('Enter your email address or registration number.')
           return
@@ -2236,16 +2372,16 @@ function LoginPage({ supabase }: { supabase: SupabaseClient | null }) {
           <p className="text-xs font-bold uppercase tracking-[.25em] text-[#E6D8C3]">Learn. Grow. Achieve.</p>
           <h1 className="font-display mt-5 text-5xl font-extrabold leading-tight">Reaching learning heights.</h1>
           <p className="mt-5 max-w-md text-base leading-7 text-white/70">
-            One connected space for learners, instructors, and the Dzikaz Academy community.
+            One connected space for learners, instructors, and the St Dzikaz Academy community.
           </p>
         </div>
-        <p className="relative text-xs text-white/45">© Dzikaz Academy</p>
+        <p className="relative text-xs text-white/45">© St Dzikaz Academy</p>
       </section>
       <section className="flex min-h-screen items-center justify-center px-6 py-12 sm:px-10">
         <div className="w-full max-w-md">
           <div className="flex items-center gap-3 lg:hidden">
             <LogoMark />
-            <span className="font-display text-lg font-bold">Dzikaz Academy</span>
+            <span className="font-display text-lg font-bold">St Dzikaz Academy</span>
           </div>
           <div className="mt-8 lg:mt-0">
             <p className="text-[10px] font-bold uppercase tracking-[.2em] text-[#5D866C]">
@@ -2256,27 +2392,13 @@ function LoginPage({ supabase }: { supabase: SupabaseClient | null }) {
             </h2>
             <p className="mt-2 text-sm text-[#789083]">
               {mode === 'signin'
-                ? 'Sign in with your academy email and password.'
-                : 'Register with a username, email address, and password.'}
+                ? 'Sign in with your academy email or registration number and password.'
+                : 'Create your learner account with your name, email address, and password.'}
             </p>
           </div>
           <form onSubmit={submit} className="mt-8 space-y-4">
             {mode === 'signup' && (
               <>
-                <Field label="Username">
-                  <input
-                    value={username}
-                    onChange={(event) => setUsername(event.target.value)}
-                    className="form-input"
-                    autoComplete="username"
-                    minLength={3}
-                    maxLength={30}
-                    pattern="[A-Za-z0-9_]+"
-                    title="Use 3 to 30 letters, numbers, or underscores."
-                    required
-                    placeholder="e.g. amara_moyo"
-                  />
-                </Field>
                 <Field label="Full name">
                   <input
                     value={fullName}
@@ -2327,7 +2449,7 @@ function LoginPage({ supabase }: { supabase: SupabaseClient | null }) {
           </button>
           </form>
           <p className="mt-6 text-center text-sm text-[#789083]">
-            {mode === 'signin' ? 'New to Dzikaz Academy?' : 'Already have an account?'}{' '}
+            {mode === 'signin' ? 'New to St Dzikaz Academy?' : 'Already have an account?'}{' '}
             <button
               type="button"
               onClick={() => {
@@ -2341,7 +2463,7 @@ function LoginPage({ supabase }: { supabase: SupabaseClient | null }) {
             </button>
           </p>
           <p className="mt-5 text-center text-[10px] text-[#98a19c]">
-            Instructor and administrator accounts are created by academy administrators.
+            Instructor and administrator accounts are created by academy administrators. Admins can sign in at /admin/.
           </p>
         </div>
       </section>
@@ -2385,7 +2507,7 @@ function PasswordChangePage({
         <div className="flex justify-center"><LogoMark /></div>
         <h1 className="font-display mt-6 text-center text-2xl font-bold">Set a new password</h1>
         <p className="mt-2 text-center text-sm leading-6 text-[#789083]">
-          For your security, choose a new password before continuing to Dzikaz Academy.
+          For your security, choose a new password before continuing to St Dzikaz Academy.
         </p>
         <div className="mt-6 space-y-4">
           <Field label="New password">
@@ -2678,7 +2800,7 @@ export default function App() {
   if (authLoading || (authUser && !profileReady)) {
     return (
       <main className="grid min-h-screen place-items-center bg-[#F5F5F0]">
-        <p className="text-sm font-semibold text-[#5D866C]">Connecting to Dzikaz Academy…</p>
+        <p className="text-sm font-semibold text-[#5D866C]">Connecting to St Dzikaz Academy…</p>
       </main>
     )
   }
@@ -2701,6 +2823,8 @@ export default function App() {
   }
 
   const renderContent = () => {
+    if (role === 'Admin' && active === 'User management')
+      return <AdminUsersPage supabase={supabase} />
     if (active === 'Notice board')
       return <NoticeBoard role={role} notices={notices} setNotices={setNotices} userId={authUser.id} supabase={supabase} />
     if (active === 'Calendar')

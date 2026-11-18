@@ -1,4 +1,4 @@
-# Dzikaz Academy
+# St Dzikaz Academy
 
 Next.js learning platform with Supabase Authentication and Postgres. Events, notices, subjects, marks, and private instructor/learner conversations use the schema and row-level security policies in `supabase/migrations`.
 
@@ -29,6 +29,9 @@ The browser only uses the Supabase URL and publishable anon key. Never expose a 
 
 The migration creates the Auth profile trigger and role-based RLS policies. `supabase db push` requires the Supabase CLI; if needed, run `supabase init`, `supabase login`, and `supabase link --project-ref <project-ref>` first. Keep the existing migration file when initializing.
 
+Admins and other existing users sign in with their email address. The academy dashboard is also available at `/admin/` (including its trailing slash).
+Gmail addresses are supported for email/password sign-in and signup. In Supabase Auth, keep the email provider enabled and configure the app's site URL and redirect allowlist for both the site root and `/admin/`.
+
 ## Import student accounts
 
 The student workbook is kept under the ignored `private-imports/` folder, never under `public/`; that folder is excluded from Git and Vercel deployments. The importer validates locally by default and does not send anything to Supabase:
@@ -49,7 +52,7 @@ The importer reads `NAME`, `SURNAME`, `CLASS`, `DOB`, `NUMBER`, `YEAR`, `GENDER`
 
 ## Roles
 
-New self-registrations receive the learner role. Create/invite instructor or administrator accounts through Supabase Auth, then assign the profile role using the Supabase SQL editor as project owner:
+New self-registrations use an email address and receive the learner role. Create/invite instructor or administrator accounts through Supabase Auth, then assign the profile role using the Supabase SQL editor as project owner:
 
 ```sql
 update public.profiles
@@ -66,5 +69,6 @@ Use the `admin` role only for trusted academy administrators. The app does not l
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `NEXT_PUBLIC_SITE_URL` (the production app URL, recommended for canonical metadata)
+- `SUPABASE_SERVICE_ROLE_KEY` (server-only; required for admins to create accounts from User management)
 
 Apply the Supabase migration before using the deployed app. Never add the service-role key or the private student workbook to Vercel. The workbook and generated credential report are excluded from deployment.

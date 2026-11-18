@@ -1,10 +1,21 @@
 create extension if not exists pgcrypto;
 
-create type public.academy_role as enum ('learner', 'instructor', 'admin');
-create type public.subject_level as enum ('O Level', 'A Level');
-create type public.notice_audience as enum ('everyone', 'learner', 'instructor', 'admin');
+do $$ begin
+  create type public.academy_role as enum ('learner', 'instructor', 'admin');
+exception when duplicate_object then null;
+end $$;
 
-create table public.profiles (
+do $$ begin
+  create type public.subject_level as enum ('O Level', 'A Level');
+exception when duplicate_object then null;
+end $$;
+
+do $$ begin
+  create type public.notice_audience as enum ('everyone', 'learner', 'instructor', 'admin');
+exception when duplicate_object then null;
+end $$;
+
+create table if not exists public.profiles (
   id uuid primary key references auth.users (id) on delete cascade,
   username text not null unique check (username ~ '^[A-Za-z0-9_]{3,30}$'),
   full_name text not null default '',
@@ -16,7 +27,7 @@ create table public.profiles (
   updated_at timestamptz not null default now()
 );
 
-create table public.student_details (
+create table if not exists public.student_details (
   profile_id uuid primary key references public.profiles (id) on delete cascade,
   registration_number text unique,
   class_name text not null default '',
@@ -26,7 +37,7 @@ create table public.student_details (
   gender text not null default ''
 );
 
-create table public.subjects (
+create table if not exists public.subjects (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   code text not null unique,
@@ -36,7 +47,7 @@ create table public.subjects (
   unique (name, level)
 );
 
-create table public.enrollments (
+create table if not exists public.enrollments (
   id uuid primary key default gen_random_uuid(),
   subject_id uuid not null references public.subjects (id) on delete cascade,
   learner_id uuid not null references public.profiles (id) on delete cascade,
@@ -44,7 +55,7 @@ create table public.enrollments (
   unique (subject_id, learner_id)
 );
 
-create table public.events (
+create table if not exists public.events (
   id uuid primary key default gen_random_uuid(),
   title text not null check (length(trim(title)) between 1 and 160),
   description text not null default '',
@@ -57,7 +68,7 @@ create table public.events (
   check (ends_at > starts_at)
 );
 
-create table public.notices (
+create table if not exists public.notices (
   id uuid primary key default gen_random_uuid(),
   title text not null check (length(trim(title)) between 1 and 160),
   body text not null check (length(trim(body)) > 0),
@@ -67,7 +78,7 @@ create table public.notices (
   updated_at timestamptz not null default now()
 );
 
-create table public.marks (
+create table if not exists public.marks (
   id uuid primary key default gen_random_uuid(),
   learner_id uuid not null references public.profiles (id) on delete cascade,
   subject_id uuid not null references public.subjects (id) on delete cascade,
@@ -80,7 +91,7 @@ create table public.marks (
   created_at timestamptz not null default now()
 );
 
-create table public.conversations (
+create table if not exists public.conversations (
   id uuid primary key default gen_random_uuid(),
   learner_id uuid not null references public.profiles (id) on delete cascade,
   instructor_id uuid not null references public.profiles (id) on delete cascade,
@@ -90,7 +101,7 @@ create table public.conversations (
   check (learner_id <> instructor_id)
 );
 
-create table public.messages (
+create table if not exists public.messages (
   id uuid primary key default gen_random_uuid(),
   conversation_id uuid not null references public.conversations (id) on delete cascade,
   sender_id uuid not null references public.profiles (id) on delete cascade,
@@ -99,15 +110,15 @@ create table public.messages (
   read_at timestamptz
 );
 
-create index subjects_instructor_id_idx on public.subjects (instructor_id);
-create index enrollments_learner_id_idx on public.enrollments (learner_id);
-create index events_starts_at_idx on public.events (starts_at);
-create index notices_created_at_idx on public.notices (created_at desc);
-create index marks_learner_subject_idx on public.marks (learner_id, subject_id, assessed_on desc);
-create index conversations_participants_idx on public.conversations (learner_id, instructor_id);
-create index messages_conversation_sent_at_idx on public.messages (conversation_id, sent_at);
+create index if not exists subjects_instructor_id_idx on public.subjects (instructor_id);
+create index if not exists enrollments_learner_id_idx on public.enrollments (learner_id);
+create index if not exists events_starts_at_idx on public.events (starts_at);
+create index if not exists notices_created_at_idx on public.notices (created_at desc);
+create index if not exists marks_learner_subject_idx on public.marks (learner_id, subject_id, assessed_on desc);
+create index if not exists conversations_participants_idx on public.conversations (learner_id, instructor_id);
+create index if not exists messages_conversation_sent_at_idx on public.messages (conversation_id, sent_at);
 
-create function public.current_academy_role()
+create or replace function public.current_academy_role()
 returns public.academy_role
 language sql
 stable
@@ -117,7 +128,7 @@ as $$
   select role from public.profiles where id = (select auth.uid())
 $$;
 
-create function public.create_profile_for_new_user()
+create or replace function public.create_profile_for_new_user()
 returns trigger
 language plpgsql
 security definer
@@ -125,6 +136,7 @@ set search_path = ''
 as $$
 declare
   requested_username text := new.raw_user_meta_data ->> 'username';
+  requested_role public.academy_role;
 begin
   if requested_username is null then
     requested_username := 'user_' || replace(substr(new.id::text, 1, 12), '-', '');
@@ -132,21 +144,28 @@ begin
     raise exception 'Username must be 3 to 30 letters, numbers, or underscores';
   end if;
 
-  insert into public.profiles (id, username, full_name, requires_password_change)
+  requested_role := case
+    when new.raw_app_meta_data ->> 'role' in ('learner', 'instructor', 'admin')
+      then (new.raw_app_meta_data ->> 'role')::public.academy_role
+    else 'learner'::public.academy_role
+  end;
+
+  insert into public.profiles (id, username, full_name, role, requires_password_change)
   values (
     new.id,
     requested_username,
     coalesce(nullif(trim(new.raw_user_meta_data ->> 'full_name'), ''), requested_username),
+    requested_role,
     (new.raw_user_meta_data ->> 'requires_password_change') = 'true'
   );
   insert into public.student_details (profile_id)
   select new.id
-  where coalesce((new.raw_app_meta_data ->> 'role'), 'learner') = 'learner';
+  where requested_role = 'learner';
   return new;
 end;
 $$;
 
-create function public.clear_password_change_requirement()
+create or replace function public.clear_password_change_requirement()
 returns trigger
 language plpgsql
 security definer
@@ -162,7 +181,7 @@ begin
 end;
 $$;
 
-create function public.lookup_subject_profiles(requested_ids uuid[])
+create or replace function public.lookup_subject_profiles(requested_ids uuid[])
 returns table (id uuid, username text, full_name text)
 language sql
 stable
@@ -195,10 +214,12 @@ $$;
 revoke all on function public.lookup_subject_profiles(uuid[]) from public, anon;
 grant execute on function public.lookup_subject_profiles(uuid[]) to authenticated;
 
+drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.create_profile_for_new_user();
 
+drop trigger if exists on_auth_user_password_changed on auth.users;
 create trigger on_auth_user_password_changed
   after update of encrypted_password on auth.users
   for each row execute function public.clear_password_change_requirement();
@@ -225,6 +246,36 @@ grant select, insert, update, delete on public.marks to authenticated;
 grant select, insert, delete on public.conversations to authenticated;
 grant select, insert on public.messages to authenticated;
 grant update (read_at) on public.messages to authenticated;
+
+drop policy if exists "Users can read permitted profiles" on public.profiles;
+drop policy if exists "Users can update their own profile" on public.profiles;
+drop policy if exists "Students and admins can read student details" on public.student_details;
+drop policy if exists "Students and admins can update contact details" on public.student_details;
+drop policy if exists "Authenticated users can read subjects" on public.subjects;
+drop policy if exists "Instructors and admins can create subjects" on public.subjects;
+drop policy if exists "Subject owners and admins can update subjects" on public.subjects;
+drop policy if exists "Subject owners and admins can delete subjects" on public.subjects;
+drop policy if exists "Learners and subject instructors can read enrollments" on public.enrollments;
+drop policy if exists "Instructors and admins can enroll learners" on public.enrollments;
+drop policy if exists "Instructors and admins can remove enrollments" on public.enrollments;
+drop policy if exists "Users can read events for their audience" on public.events;
+drop policy if exists "Instructors and admins can create events" on public.events;
+drop policy if exists "Event authors and admins can update events" on public.events;
+drop policy if exists "Event authors and admins can delete events" on public.events;
+drop policy if exists "Users can read notices for their audience" on public.notices;
+drop policy if exists "Instructors and admins can create notices" on public.notices;
+drop policy if exists "Notice authors and admins can update notices" on public.notices;
+drop policy if exists "Notice authors and admins can delete notices" on public.notices;
+drop policy if exists "Learners, subject instructors, and admins can read marks" on public.marks;
+drop policy if exists "Subject instructors and admins can record marks" on public.marks;
+drop policy if exists "Mark authors and admins can update marks" on public.marks;
+drop policy if exists "Mark authors and admins can delete marks" on public.marks;
+drop policy if exists "Conversation participants can read conversations" on public.conversations;
+drop policy if exists "Enrolled learners and their instructors can start conversations" on public.conversations;
+drop policy if exists "Conversation participants and admins can delete conversations" on public.conversations;
+drop policy if exists "Conversation participants can read messages" on public.messages;
+drop policy if exists "Conversation participants can send messages as themselves" on public.messages;
+drop policy if exists "Recipients can mark messages as read" on public.messages;
 
 create policy "Users can read permitted profiles"
   on public.profiles for select to authenticated

@@ -18,6 +18,7 @@ const makePublicPreviewOrigin = (() => {
 })()
 
 const nextConfig: NextConfig = {
+  trailingSlash: true,
   turbopack: {
     root: path.resolve(dirname),
   },
