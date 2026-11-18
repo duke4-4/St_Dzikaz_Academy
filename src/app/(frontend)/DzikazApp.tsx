@@ -3359,10 +3359,11 @@ function LoginPage({
     setSubmitting(true)
     try {
       if (mode === 'signup') {
+        const username = `user_${crypto.randomUUID().replace(/-/g, '').slice(0, 25)}`
         const { error: signUpError } = await supabase.auth.signUp({
           email: email.trim().toLowerCase(),
           password,
-          options: { data: { full_name: fullName.trim() } },
+          options: { data: { username, full_name: fullName.trim() } },
         })
         if (signUpError) throw signUpError
         setMessage('Account created. Check your email to confirm your address, then sign in.')
