@@ -32,6 +32,8 @@ The migration creates the Auth profile trigger and role-based RLS policies. `sup
 Admins and other existing users sign in with their email address. The academy dashboard is also available at `/admin/` (including its trailing slash).
 Gmail addresses are supported for email/password sign-in and signup. In Supabase Auth, keep the email provider enabled and configure the app's site URL and redirect allowlist for both the site root and `/admin/`.
 
+The classroom workflow is in `supabase/migrations/202611180001_classroom_workflows.sql`. Apply it with `supabase db push` before using classroom pages. It adds subject archiving, student enrollment by registration number, classroom documents, assignments and submissions, attendance, and the private `classroom-files` Storage bucket. Classroom and submitted files are limited to PDF/DOC/DOCX and 10 MB. Archived subjects keep their records and are read-only.
+
 ## Import student accounts
 
 The student workbook is kept under the ignored `private-imports/` folder, never under `public/`; that folder is excluded from Git and Vercel deployments. The importer validates locally by default and does not send anything to Supabase:
@@ -52,7 +54,9 @@ The importer reads `NAME`, `SURNAME`, `CLASS`, `DOB`, `NUMBER`, `YEAR`, `GENDER`
 
 ## Roles
 
-New self-registrations use an email address and receive the learner role. Create/invite instructor or administrator accounts through Supabase Auth, then assign the profile role using the Supabase SQL editor as project owner:
+New self-registrations use an email address and receive the learner role. After the first administrator is set up, admins can create learner, instructor, and additional administrator accounts from **User management** in the dashboard. Admins can remove other accounts there; the last administrator and the current admin account are protected from deletion. Removing an account deletes its linked profile data and may be blocked when staff-owned records still reference it.
+
+The initial administrator must be assigned by the project owner once, using the Supabase SQL editor:
 
 ```sql
 update public.profiles

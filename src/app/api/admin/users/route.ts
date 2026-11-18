@@ -12,17 +12,91 @@ function jsonError(error: string, status: number) {
   return NextResponse.json({ error }, { status })
 }
 
-export async function POST(request: Request) {
-  const authorization = request.headers.get('authorization')
-  const accessToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1]
-  if (!accessToken) return jsonError('Sign in before adding a user.', 401)
+async function authorizeAdmin(request: Request) {
+  const accessToken = request.headers.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1]
+  if (!accessToken) {
+    return { response: jsonError('Sign in before managing users.', 401) } as const
+  }
 
   const supabaseURL = process.env.NEXT_PUBLIC_SUPABASE_URL
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!supabaseURL || !anonKey || !serviceRoleKey) {
-    return jsonError('User creation is not configured on the server.', 503)
+    return { response: jsonError('User management is not configured on the server.', 503) } as const
   }
+
+  const userClient = createClient(supabaseURL, anonKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+    global: { headers: { Authorization: `Bearer ${accessToken}` } },
+  })
+  const { data: { user }, error: authError } = await userClient.auth.getUser(accessToken)
+  if (authError || !user) {
+    return { response: jsonError('Your sign-in session is invalid or expired.', 401) } as const
+  }
+
+  const { data: profile, error: profileError } = await userClient
+    .from('profiles')
+    .select('role')
+    .eq('id', user.id)
+    .maybeSingle()
+  if (profileError) {
+    return { response: jsonError('Could not verify administrator access.', 500) } as const
+  }
+  if (profile?.role !== 'admin') {
+    return { response: jsonError('Only administrators can manage users.', 403) } as const
+  }
+
+  const adminClient = createClient(supabaseURL, serviceRoleKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  })
+  return { context: { userClient, adminClient, userId: user.id } } as const
+}
+
+export async function GET(request: Request) {
+  const authorization = await authorizeAdmin(request)
+  if ('response' in authorization) return authorization.response
+
+  const pageValue = new URL(request.url).searchParams.get('page') ?? '1'
+  const page = Number(pageValue)
+  if (!Number.isInteger(page) || page < 1) return jsonError('Page must be a positive integer.', 400)
+
+  const perPage = 100
+  const { data, error } = await authorization.context.adminClient.auth.admin.listUsers({
+    page,
+    perPage,
+  })
+  if (error) return jsonError(error.message, 400)
+
+  const userIds = data.users.map((user) => user.id)
+  const { data: profiles, error: profilesError } = userIds.length
+    ? await authorization.context.userClient
+        .from('profiles')
+        .select('id, username, full_name, role')
+        .in('id', userIds)
+    : { data: [], error: null }
+  if (profilesError) return jsonError('Could not load academy user profiles.', 500)
+
+  const profileById = new Map((profiles ?? []).map((profile) => [profile.id, profile]))
+  const users = data.users.flatMap((user) => {
+    const profile = profileById.get(user.id)
+    if (!profile || !isAcademyRole(profile.role)) return []
+    return [{
+      id: user.id,
+      name: profile.full_name || profile.username,
+      email: user.email ?? '',
+      role: profile.role,
+    }]
+  })
+
+  return NextResponse.json({
+    users,
+    nextPage: data.users.length === perPage ? page + 1 : null,
+  })
+}
+
+export async function POST(request: Request) {
+  const authorization = await authorizeAdmin(request)
+  if ('response' in authorization) return authorization.response
 
   let body: unknown
   try {
@@ -51,32 +125,61 @@ export async function POST(request: Request) {
   }
   if (!isAcademyRole(role)) return jsonError('Choose a valid academy role.', 400)
 
-  const userClient = createClient(supabaseURL, anonKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-    global: { headers: { Authorization: `Bearer ${accessToken}` } },
-  })
-  const { data: { user }, error: authError } = await userClient.auth.getUser(accessToken)
-  if (authError || !user) return jsonError('Your sign-in session is invalid or expired.', 401)
-
-  const { data: profile, error: profileError } = await userClient
-    .from('profiles')
-    .select('role')
-    .eq('id', user.id)
-    .maybeSingle()
-  if (profileError) return jsonError('Could not verify administrator access.', 500)
-  if (profile?.role !== 'admin') return jsonError('Only administrators can add users.', 403)
-
-  const adminClient = createClient(supabaseURL, serviceRoleKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  })
-  const { data, error: createError } = await adminClient.auth.admin.createUser({
+  const { data, error } = await authorization.context.adminClient.auth.admin.createUser({
     email,
     password,
     email_confirm: true,
     user_metadata: { full_name: fullName, requires_password_change: true },
     app_metadata: { role },
   })
-  if (createError) return jsonError(createError.message, 400)
+  if (error) return jsonError(error.message, 400)
 
   return NextResponse.json({ id: data.user.id, email: data.user.email, role }, { status: 201 })
+}
+
+export async function DELETE(request: Request) {
+  const authorization = await authorizeAdmin(request)
+  if ('response' in authorization) return authorization.response
+
+  let body: unknown
+  try {
+    body = await request.json()
+  } catch {
+    return jsonError('Request body must be valid JSON.', 400)
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return jsonError('Request body must be an object.', 400)
+  }
+
+  const userId = (body as Record<string, unknown>).userId
+  if (typeof userId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) {
+    return jsonError('Choose a valid user account.', 400)
+  }
+  if (userId === authorization.context.userId) {
+    return jsonError('You cannot remove your own administrator account.', 400)
+  }
+
+  const { data: target, error: targetError } = await authorization.context.userClient
+    .from('profiles')
+    .select('role')
+    .eq('id', userId)
+    .maybeSingle()
+  if (targetError) return jsonError('Could not verify the selected account.', 500)
+  if (!target) return jsonError('That academy account was not found.', 404)
+
+  if (target.role === 'admin') {
+    const { count, error: countError } = await authorization.context.userClient
+      .from('profiles')
+      .select('id', { count: 'exact', head: true })
+      .eq('role', 'admin')
+    if (countError) return jsonError('Could not verify the remaining administrator accounts.', 500)
+    if ((count ?? 0) <= 1) {
+      return jsonError('The last administrator account cannot be removed.', 400)
+    }
+  }
+
+  const { error } = await authorization.context.adminClient.auth.admin.deleteUser(userId)
+  if (error) return jsonError(error.message, 400)
+
+  return NextResponse.json({ id: userId })
 }

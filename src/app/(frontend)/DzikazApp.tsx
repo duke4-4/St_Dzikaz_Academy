@@ -190,6 +190,7 @@ const navByRole: Record<Role, { label: string; icon: IconName }[]> = {
   Learner: [
     { label: 'Overview', icon: 'home' },
     { label: 'My learning', icon: 'book' },
+    { label: 'Classrooms', icon: 'users' },
     { label: 'My marks', icon: 'chart' },
     { label: 'Messages', icon: 'mail' },
     { label: 'Notice board', icon: 'bell' },
@@ -198,6 +199,7 @@ const navByRole: Record<Role, { label: string; icon: IconName }[]> = {
   Instructor: [
     { label: 'Overview', icon: 'home' },
     { label: 'My subjects', icon: 'book' },
+    { label: 'Classrooms', icon: 'users' },
     { label: 'Students', icon: 'users' },
     { label: 'Marks', icon: 'chart' },
     { label: 'Messages', icon: 'mail' },
@@ -226,6 +228,7 @@ type Subject = {
   level: 'O Level' | 'A Level'
   code: string
   learners: number
+  archived_at?: string | null
 }
 
 type Profile = {
@@ -234,6 +237,36 @@ type Profile = {
   school: string
   phone: string
   image?: string
+}
+
+type ManagedUser = {
+  id: string
+  name: string
+  email: string
+  role: 'learner' | 'instructor' | 'admin'
+}
+
+function isManagedUser(value: unknown): value is ManagedUser {
+  if (!value || typeof value !== 'object') return false
+  const user = value as Record<string, unknown>
+  return (
+    typeof user.id === 'string' &&
+    typeof user.name === 'string' &&
+    typeof user.email === 'string' &&
+    (user.role === 'learner' || user.role === 'instructor' || user.role === 'admin')
+  )
+}
+
+function isClassroomLearnerProfile(
+  value: unknown,
+): value is { id: string; full_name: string; username: string } {
+  if (!value || typeof value !== 'object') return false
+  const profile = value as Record<string, unknown>
+  return (
+    typeof profile.id === 'string' &&
+    typeof profile.full_name === 'string' &&
+    typeof profile.username === 'string'
+  )
 }
 
 const profileDefaults: Record<Role, Profile> = {
@@ -947,6 +980,13 @@ function AdminDashboard() {
 }
 
 function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
+  const [users, setUsers] = useState<ManagedUser[]>([])
+  const [currentUserId, setCurrentUserId] = useState('')
+  const [nextPage, setNextPage] = useState<number | null>(null)
+  const [loadingUsers, setLoadingUsers] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [usersError, setUsersError] = useState('')
+  const [removingUserId, setRemovingUserId] = useState('')
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -954,6 +994,55 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
+
+  const loadUsers = useCallback(async (page = 1, append = false) => {
+    if (append) setLoadingMore(true)
+    else setLoadingUsers(true)
+    setUsersError('')
+
+    try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+      if (sessionError) throw new Error(`Could not verify your session: ${sessionError.message}`)
+      if (!session) throw new Error('Your session expired. Sign in again to manage users.')
+      setCurrentUserId(session.user.id)
+
+      const response = await fetch(`/api/admin/users/?page=${page}`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      })
+      const result: unknown = await response.json()
+      const responseBody =
+        typeof result === 'object' && result !== null
+          ? (result as Record<string, unknown>)
+          : {}
+      if (!response.ok) {
+        throw new Error(
+          typeof responseBody.error === 'string'
+            ? responseBody.error
+            : 'Could not load academy users.',
+        )
+      }
+      if (!Array.isArray(responseBody.users)) {
+        throw new Error('The server returned an invalid user list.')
+      }
+
+      const loadedUsers = responseBody.users.filter(isManagedUser)
+      setUsers((current) => append ? [...current, ...loadedUsers] : loadedUsers)
+      setNextPage(
+        typeof responseBody.nextPage === 'number' ? responseBody.nextPage : null,
+      )
+    } catch (loadError) {
+      setUsersError(
+        loadError instanceof Error ? loadError.message : 'Could not load academy users.',
+      )
+    } finally {
+      setLoadingUsers(false)
+      setLoadingMore(false)
+    }
+  }, [supabase])
+
+  useEffect(() => {
+    void loadUsers()
+  }, [loadUsers])
 
   const addUser = async (event: FormEvent) => {
     event.preventDefault()
@@ -999,12 +1088,57 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
       setEmail('')
       setPassword('')
       setRole('learner')
+      await loadUsers()
     } catch (requestError) {
       setError(
         requestError instanceof Error ? requestError.message : 'Could not create the account.',
       )
     } finally {
       setSaving(false)
+    }
+  }
+
+  const removeUser = async (user: ManagedUser) => {
+    if (
+      !window.confirm(
+        `Permanently remove ${user.name} (${user.email})? Linked profile data and learner records may also be deleted. Staff accounts with assigned records may need those records reassigned first.`,
+      )
+    ) return
+
+    setUsersError('')
+    setRemovingUserId(user.id)
+    try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+      if (sessionError) throw new Error(`Could not verify your session: ${sessionError.message}`)
+      if (!session) throw new Error('Your session expired. Sign in again to manage users.')
+
+      const response = await fetch('/api/admin/users/', {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ userId: user.id }),
+      })
+      const result: unknown = await response.json()
+      const responseBody =
+        typeof result === 'object' && result !== null
+          ? (result as Record<string, unknown>)
+          : {}
+      if (!response.ok) {
+        throw new Error(
+          typeof responseBody.error === 'string'
+            ? responseBody.error
+            : 'Could not remove the account.',
+        )
+      }
+      setUsers((current) => current.filter((item) => item.id !== user.id))
+    } catch (removeError) {
+      setUsersError(
+        removeError instanceof Error ? removeError.message : 'Could not remove the account.',
+      )
+    } finally {
+      setRemovingUserId('')
     }
   }
 
@@ -1077,6 +1211,75 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
           {saving ? 'Creating account…' : 'Add user'}
         </button>
       </form>
+      <section className="card mt-6 overflow-hidden">
+        <div className="flex items-center justify-between border-b border-[#31533d]/10 px-5 py-4">
+          <div>
+            <h2 className="font-display font-bold text-[#284633]">Academy accounts</h2>
+            <p className="mt-1 text-xs text-[#789083]">
+              Add admins here by selecting the Admin role above, or remove accounts below.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void loadUsers()}
+            disabled={loadingUsers}
+            className="secondary-button"
+          >
+            Refresh
+          </button>
+        </div>
+        {usersError && (
+          <p role="alert" className="m-4 rounded-lg bg-[#9b7466]/10 p-3 text-xs text-[#8a5548]">
+            {usersError}
+          </p>
+        )}
+        {loadingUsers ? (
+          <p className="p-5 text-sm text-[#789083]">Loading academy accounts…</p>
+        ) : users.length === 0 ? (
+          <p className="p-5 text-sm text-[#789083]">No accounts found.</p>
+        ) : (
+          <ul className="divide-y divide-[#31533d]/8">
+            {users.map((user) => (
+              <li
+                key={user.id}
+                className="flex flex-wrap items-center justify-between gap-4 px-5 py-4"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold text-[#284633]">
+                    {user.name}{user.id === currentUserId ? ' (you)' : ''}
+                  </p>
+                  <p className="truncate text-xs text-[#789083]">{user.email}</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="rounded-full bg-[#F5F5F0] px-3 py-1 text-[10px] font-bold capitalize text-[#5D866C]">
+                    {user.role}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={user.id === currentUserId || removingUserId === user.id}
+                    onClick={() => void removeUser(user)}
+                    className="rounded-lg px-3 py-2 text-xs font-bold text-[#8a5548] hover:bg-[#9b7466]/10 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {removingUserId === user.id ? 'Removing…' : 'Remove'}
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        {nextPage && !loadingUsers && (
+          <div className="border-t border-[#31533d]/10 p-4 text-center">
+            <button
+              type="button"
+              disabled={loadingMore}
+              onClick={() => void loadUsers(nextPage, true)}
+              className="text-xs font-bold text-[#5D866C] disabled:opacity-60"
+            >
+              {loadingMore ? 'Loading…' : 'Load more accounts'}
+            </button>
+          </div>
+        )}
+      </section>
     </DashboardFrame>
   )
 }
@@ -1648,6 +1851,8 @@ function SubjectsPage({
   supabase: SupabaseClient
 }) {
   const [editing, setEditing] = useState<Subject | null>(null)
+  const [classroomSubject, setClassroomSubject] = useState<Subject | null>(null)
+  const [showArchived, setShowArchived] = useState(false)
   const [showForm, setShowForm] = useState(false)
   const [name, setName] = useState('')
   const [level, setLevel] = useState<Subject['level']>('O Level')
@@ -1659,7 +1864,7 @@ function SubjectsPage({
     const loadSubjects = async () => {
       const { data, error: queryError } = await supabase
         .from('subjects')
-        .select('id, name, level, code')
+        .select('id, name, level, code, archived_at')
         .eq('instructor_id', userId)
         .order('name')
       if (!active) return
@@ -1709,8 +1914,8 @@ function SubjectsPage({
     setError('')
     const values = { name: name.trim(), level, code: code.trim() }
     const result = editing
-      ? await supabase.from('subjects').update(values).eq('id', editing.id).select('id, name, level, code').single()
-      : await supabase.from('subjects').insert({ ...values, instructor_id: userId }).select('id, name, level, code').single()
+      ? await supabase.from('subjects').update(values).eq('id', editing.id).select('id, name, level, code, archived_at').single()
+      : await supabase.from('subjects').insert({ ...values, instructor_id: userId }).select('id, name, level, code, archived_at').single()
     if (result.error) {
       setError(result.error.message)
       return
@@ -1720,6 +1925,18 @@ function SubjectsPage({
       ? subjects.map((subject) => subject.id === editing.id ? savedSubject : subject)
       : [...subjects, savedSubject])
     reset()
+  }
+  const visibleSubjects = subjects.filter((subject) => Boolean(subject.archived_at) === showArchived)
+  if (classroomSubject) {
+    return (
+      <ClassroomWorkspace
+        role="Instructor"
+        subject={classroomSubject}
+        userId={userId}
+        supabase={supabase}
+        onBack={() => setClassroomSubject(null)}
+      />
+    )
   }
   return (
     <DashboardFrame
@@ -1768,8 +1985,17 @@ function SubjectsPage({
           </div>
         </form>
       )}
+      <div className="mb-4 flex justify-end">
+        <button
+          type="button"
+          onClick={() => setShowArchived((current) => !current)}
+          className="text-xs font-bold text-[#5D866C] hover:underline"
+        >
+          {showArchived ? 'Show active subjects' : 'Show archived subjects'}
+        </button>
+      </div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {subjects.map((subject, index) => (
+        {visibleSubjects.map((subject, index) => (
           <article key={subject.id} className="card p-5">
             <div className="flex items-start justify-between">
               <span
@@ -1784,26 +2010,815 @@ function SubjectsPage({
             <h2 className="font-display mt-5 text-lg font-bold">{subject.name}</h2>
             <p className="mt-1 text-xs text-[#789083]">
               Syllabus {subject.code} · {subject.learners} learners
+              {subject.archived_at ? ' · Archived' : ''}
             </p>
             <div className="mt-5 flex gap-2 border-t border-[#31533d]/8 pt-4">
+              <button
+                type="button"
+                onClick={() => setClassroomSubject(subject)}
+                className="secondary-button flex-1"
+              >
+                Open classroom
+              </button>
               <button onClick={() => openEdit(subject)} className="secondary-button flex-1">
                 <Icon name="edit" size={14} /> Edit
               </button>
               <button
                 onClick={async () => {
-                  const { error: deleteError } = await supabase.from('subjects').delete().eq('id', subject.id)
-                  if (deleteError) setError(deleteError.message)
-                  else setSubjects(subjects.filter((item) => item.id !== subject.id))
+                  if (
+                    !subject.archived_at &&
+                    !window.confirm(`Archive ${subject.name}? Its classroom documents, attendance, and student work will be retained.`)
+                  ) return
+                  const archivedAt = subject.archived_at ? null : new Date().toISOString()
+                  const { error: archiveError } = await supabase
+                    .from('subjects')
+                    .update({ archived_at: archivedAt })
+                    .eq('id', subject.id)
+                  if (archiveError) setError(archiveError.message)
+                  else {
+                    setSubjects(subjects.map((item) =>
+                      item.id === subject.id ? { ...item, archived_at: archivedAt } : item,
+                    ))
+                  }
                 }}
                 className="grid h-9 w-9 place-items-center rounded-lg border border-[#9b7466]/20 text-[#9b7466] hover:bg-[#9b7466]/10"
-                aria-label={`Delete ${subject.name}`}
+                aria-label={`${subject.archived_at ? 'Restore' : 'Archive'} ${subject.name}`}
+                title={subject.archived_at ? 'Restore subject' : 'Archive subject'}
               >
-                <Icon name="trash" size={15} />
+                <Icon name={subject.archived_at ? 'check' : 'trash'} size={15} />
               </button>
             </div>
           </article>
         ))}
       </div>
+    </DashboardFrame>
+  )
+}
+
+type ClassroomDocument = {
+  id: string
+  title: string
+  file_name: string
+  storage_path: string
+  created_at: string
+}
+
+type ClassroomAssignment = {
+  id: string
+  title: string
+  instructions: string
+  max_score: number
+  due_at: string | null
+}
+
+type ClassroomSubmission = {
+  id: string
+  assignment_id: string
+  learner_id: string
+  file_name: string
+  storage_path: string
+  submitted_at: string
+}
+
+type ClassroomMark = {
+  id: string
+  assignment_id: string
+  learner_id: string
+  score: number
+  max_score: number
+  feedback: string
+}
+
+type ClassroomLearner = {
+  id: string
+  name: string
+  username: string
+}
+
+type AttendanceStatus = 'present' | 'absent' | 'late' | 'excused'
+
+const classroomBucket = 'classroom-files'
+const classroomFileSizeLimit = 10 * 1024 * 1024
+const classroomFileTypes: Record<string, string> = {
+  pdf: 'application/pdf',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+}
+
+function getClassroomFileMimeType(file: File) {
+  const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
+  const mimeType = classroomFileTypes[extension]
+  if (!mimeType) throw new Error('Choose a PDF, DOC, or DOCX file.')
+  if (file.size > classroomFileSizeLimit) throw new Error('Files must be 10 MB or smaller.')
+  if (file.type && file.type !== mimeType) throw new Error('The selected file type does not match its extension.')
+  return mimeType
+}
+
+function safeClassroomFileName(fileName: string) {
+  return fileName.replace(/[^\w.-]+/g, '_').slice(-120)
+}
+
+function ClassroomsPage({
+  role,
+  userId,
+  supabase,
+}: {
+  role: 'Learner' | 'Instructor'
+  userId: string
+  supabase: SupabaseClient
+}) {
+  const [subjects, setSubjects] = useState<Subject[]>([])
+  const [selectedSubject, setSelectedSubject] = useState<Subject | null>(null)
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    const loadSubjects = async () => {
+      setLoading(true)
+      setError('')
+      try {
+        if (role === 'Learner') {
+          const { data, error: enrollmentError } = await supabase
+            .from('enrollments')
+            .select('subject_id, subjects(id, name, level, code, archived_at)')
+            .eq('learner_id', userId)
+          if (enrollmentError) throw enrollmentError
+          const enrolledSubjects = (data ?? []).flatMap((enrollment) => {
+            const related = enrollment.subjects
+            const rows = Array.isArray(related) ? related : related ? [related] : []
+            return rows.map((subject) => ({ ...subject, learners: 0 }))
+          })
+          if (active) setSubjects(enrolledSubjects)
+        } else {
+          const { data, error: queryError } = await supabase
+            .from('subjects')
+            .select('id, name, level, code, archived_at')
+            .eq('instructor_id', userId)
+            .is('archived_at', null)
+            .order('name')
+          if (queryError) throw queryError
+          if (active) setSubjects((data ?? []).map((subject) => ({ ...subject, learners: 0 })))
+        }
+      } catch (loadError) {
+        if (active) setError(loadError instanceof Error ? loadError.message : 'Could not load classrooms.')
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+    void loadSubjects()
+    return () => { active = false }
+  }, [role, supabase, userId])
+
+  if (selectedSubject) {
+    return (
+      <ClassroomWorkspace
+        role={role}
+        subject={selectedSubject}
+        userId={userId}
+        supabase={supabase}
+        onBack={() => setSelectedSubject(null)}
+      />
+    )
+  }
+
+  return (
+    <DashboardFrame
+      eyebrow={role === 'Learner' ? 'Learner workspace' : 'Instructor workspace'}
+      title="Classrooms"
+      subtitle={role === 'Learner' ? 'Open an enrolled subject to view classwork and submit assignments.' : 'Open one of your subjects to manage classwork and students.'}
+    >
+      {error && <p role="alert" className="mb-4 rounded-lg bg-[#9b7466]/10 p-3 text-sm text-[#8a5548]">{error}</p>}
+      {loading ? (
+        <div className="card p-6 text-sm text-[#789083]">Loading classrooms…</div>
+      ) : subjects.length === 0 ? (
+        <div className="card p-6 text-sm text-[#789083]">
+          {role === 'Learner'
+            ? 'You are not enrolled in a classroom yet. Ask a teacher or administrator for enrollment.'
+            : 'Create a subject in My subjects to start a classroom.'}
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {subjects.map((subject) => (
+            <button
+              key={subject.id}
+              type="button"
+              onClick={() => setSelectedSubject(subject)}
+              className="card p-5 text-left transition hover:-translate-y-0.5 hover:shadow-md"
+            >
+              <span className="grid h-11 w-11 place-items-center rounded-xl bg-[#5D866C] text-white">
+                <Icon name="book" />
+              </span>
+              <h2 className="font-display mt-5 text-lg font-bold">{subject.name}</h2>
+              <p className="mt-1 text-xs text-[#789083]">
+                {subject.level} · Syllabus {subject.code}
+                {subject.archived_at ? ' · Archived' : ''}
+              </p>
+            </button>
+          ))}
+        </div>
+      )}
+    </DashboardFrame>
+  )
+}
+
+function ClassroomWorkspace({
+  role,
+  subject,
+  userId,
+  supabase,
+  onBack,
+}: {
+  role: 'Learner' | 'Instructor'
+  subject: Subject
+  userId: string
+  supabase: SupabaseClient
+  onBack: () => void
+}) {
+  const [documents, setDocuments] = useState<ClassroomDocument[]>([])
+  const [assignments, setAssignments] = useState<ClassroomAssignment[]>([])
+  const [submissions, setSubmissions] = useState<ClassroomSubmission[]>([])
+  const [learners, setLearners] = useState<ClassroomLearner[]>([])
+  const [marks, setMarks] = useState<ClassroomMark[]>([])
+  const [attendance, setAttendance] = useState<Record<string, AttendanceStatus>>({})
+  const [attendanceDate, setAttendanceDate] = useState(new Date().toISOString().slice(0, 10))
+  const [documentTitle, setDocumentTitle] = useState('')
+  const [documentFile, setDocumentFile] = useState<File | null>(null)
+  const [assignmentTitle, setAssignmentTitle] = useState('')
+  const [assignmentInstructions, setAssignmentInstructions] = useState('')
+  const [assignmentDue, setAssignmentDue] = useState('')
+  const [assignmentMaxScore, setAssignmentMaxScore] = useState('100')
+  const [submissionFiles, setSubmissionFiles] = useState<Record<string, File | undefined>>({})
+  const [scoreDrafts, setScoreDrafts] = useState<Record<string, string>>({})
+  const [feedbackDrafts, setFeedbackDrafts] = useState<Record<string, string>>({})
+  const [registrationNumber, setRegistrationNumber] = useState('')
+  const [savingAction, setSavingAction] = useState('')
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+  const [loading, setLoading] = useState(true)
+
+  const archived = Boolean(subject.archived_at)
+  const loadClassroom = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const { data: documentRows, error: documentsError } = await supabase
+        .from('classroom_documents')
+        .select('id, title, file_name, storage_path, created_at')
+        .eq('subject_id', subject.id)
+        .order('created_at', { ascending: false })
+      if (documentsError) throw documentsError
+
+      const { data: assignmentRows, error: assignmentsError } = await supabase
+        .from('classroom_assignments')
+        .select('id, title, instructions, max_score, due_at')
+        .eq('subject_id', subject.id)
+        .order('created_at', { ascending: false })
+      if (assignmentsError) throw assignmentsError
+
+      const { data: enrollmentRows, error: enrollmentsError } = await supabase
+        .from('enrollments')
+        .select('learner_id')
+        .eq('subject_id', subject.id)
+      if (enrollmentsError) throw enrollmentsError
+      const learnerIds = [...new Set((enrollmentRows ?? []).map((row) => row.learner_id))]
+      const { data: learnerRows, error: learnersError } = learnerIds.length
+        ? await supabase.rpc('lookup_subject_profiles', { requested_ids: learnerIds })
+        : { data: [], error: null }
+      if (learnersError) throw learnersError
+
+      const assignmentIds = (assignmentRows ?? []).map((item) => item.id)
+      const { data: submissionRows, error: submissionsError } = assignmentIds.length
+        ? await supabase
+            .from('classroom_submissions')
+            .select('id, assignment_id, learner_id, file_name, storage_path, submitted_at')
+            .in('assignment_id', assignmentIds)
+        : { data: [], error: null }
+      if (submissionsError) throw submissionsError
+
+      const { data: markRows, error: marksError } = assignmentIds.length
+        ? await supabase
+            .from('marks')
+            .select('id, assignment_id, learner_id, score, max_score, feedback')
+            .in('assignment_id', assignmentIds)
+        : { data: [], error: null }
+      if (marksError) throw marksError
+
+      const { data: attendanceRows, error: attendanceError } = await supabase
+        .from('classroom_attendance')
+        .select('learner_id, status')
+        .eq('subject_id', subject.id)
+        .eq('attendance_date', attendanceDate)
+      if (attendanceError) throw attendanceError
+
+      setDocuments(documentRows ?? [])
+      setAssignments(assignmentRows ?? [])
+      const verifiedLearners: { id: string; full_name: string; username: string }[] =
+        Array.isArray(learnerRows)
+          ? learnerRows.filter(
+              (item: unknown): item is { id: string; full_name: string; username: string } =>
+                isClassroomLearnerProfile(item),
+            )
+          : []
+      setLearners(verifiedLearners.map((item) => ({
+        id: item.id,
+        name: item.full_name || item.username,
+        username: item.username,
+      })))
+      setSubmissions(submissionRows ?? [])
+      setMarks(markRows ?? [])
+      setAttendance(Object.fromEntries(
+        (attendanceRows ?? []).map((row) => [row.learner_id, row.status as AttendanceStatus]),
+      ))
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Could not load classroom data.')
+    } finally {
+      setLoading(false)
+    }
+  }, [attendanceDate, subject.id, supabase])
+
+  useEffect(() => {
+    void loadClassroom()
+  }, [loadClassroom])
+
+  const downloadFile = async (storagePath: string, fileName: string) => {
+    setError('')
+    const { data, error: downloadError } = await supabase.storage
+      .from(classroomBucket)
+      .download(storagePath)
+    if (downloadError) {
+      setError(downloadError.message)
+      return
+    }
+    const url = URL.createObjectURL(data)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const uploadMaterial = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!documentFile || !documentTitle.trim()) return
+    setError('')
+    setMessage('')
+    setSavingAction('document')
+    try {
+      const mimeType = getClassroomFileMimeType(documentFile)
+      const fileName = safeClassroomFileName(documentFile.name)
+      const storagePath = `subjects/${subject.id}/materials/${crypto.randomUUID()}-${fileName}`
+      const { error: uploadError } = await supabase.storage
+        .from(classroomBucket)
+        .upload(storagePath, documentFile, { contentType: mimeType, upsert: false })
+      if (uploadError) throw uploadError
+
+      const { error: insertError } = await supabase.from('classroom_documents').insert({
+        subject_id: subject.id,
+        uploaded_by: userId,
+        title: documentTitle.trim(),
+        file_name: documentFile.name,
+        storage_path: storagePath,
+        mime_type: mimeType,
+        size_bytes: documentFile.size,
+      })
+      if (insertError) {
+        const { error: cleanupError } = await supabase.storage.from(classroomBucket).remove([storagePath])
+        throw new Error(cleanupError ? `${insertError.message} Temporary upload cleanup failed: ${cleanupError.message}` : insertError.message)
+      }
+      setDocumentTitle('')
+      setDocumentFile(null)
+      setMessage('Classroom document added.')
+      await loadClassroom()
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : 'Could not upload the document.')
+    } finally {
+      setSavingAction('')
+    }
+  }
+
+  const createAssignment = async (event: FormEvent) => {
+    event.preventDefault()
+    setError('')
+    setMessage('')
+    setSavingAction('assignment')
+    const maxScore = Number(assignmentMaxScore)
+    if (!Number.isFinite(maxScore) || maxScore <= 0) {
+      setError('Maximum score must be greater than zero.')
+      setSavingAction('')
+      return
+    }
+    const { error: insertError } = await supabase.from('classroom_assignments').insert({
+      subject_id: subject.id,
+      created_by: userId,
+      title: assignmentTitle.trim(),
+      instructions: assignmentInstructions.trim(),
+      max_score: maxScore,
+      due_at: assignmentDue ? new Date(assignmentDue).toISOString() : null,
+    })
+    if (insertError) setError(insertError.message)
+    else {
+      setAssignmentTitle('')
+      setAssignmentInstructions('')
+      setAssignmentDue('')
+      setAssignmentMaxScore('100')
+      setMessage('Assignment created.')
+      await loadClassroom()
+    }
+    setSavingAction('')
+  }
+
+  const enrollLearner = async (event: FormEvent) => {
+    event.preventDefault()
+    setError('')
+    setMessage('')
+    setSavingAction('enrollment')
+    try {
+      const { data, error: lookupError } = await supabase.rpc(
+        'lookup_learner_for_enrollment',
+        { requested_registration_number: registrationNumber.trim() },
+      )
+      if (lookupError) throw lookupError
+      const foundLearner = data?.[0]
+      if (!foundLearner) {
+        setError('No learner was found for that registration number.')
+        return
+      }
+
+      const { error: enrollmentError } = await supabase
+        .from('enrollments')
+        .upsert(
+          { subject_id: subject.id, learner_id: foundLearner.id },
+          { onConflict: 'subject_id,learner_id', ignoreDuplicates: true },
+        )
+      if (enrollmentError) throw enrollmentError
+
+      setRegistrationNumber('')
+      setMessage(`${foundLearner.full_name || foundLearner.registration_number} added to this classroom.`)
+      await loadClassroom()
+    } catch (enrollError) {
+      setError(enrollError instanceof Error ? enrollError.message : 'Could not add the learner.')
+    } finally {
+      setSavingAction('')
+    }
+  }
+
+  const submitWork = async (event: FormEvent, assignment: ClassroomAssignment) => {
+    event.preventDefault()
+    const file = submissionFiles[assignment.id]
+    if (!file) {
+      setError('Choose a PDF, DOC, or DOCX file to submit.')
+      return
+    }
+    setError('')
+    setMessage('')
+    setSavingAction(`submission:${assignment.id}`)
+    try {
+      const mimeType = getClassroomFileMimeType(file)
+      const oldSubmission = submissions.find((item) => item.assignment_id === assignment.id && item.learner_id === userId)
+      const storagePath = `subjects/${subject.id}/submissions/${assignment.id}/${userId}/${crypto.randomUUID()}-${safeClassroomFileName(file.name)}`
+      const { error: uploadError } = await supabase.storage
+        .from(classroomBucket)
+        .upload(storagePath, file, { contentType: mimeType, upsert: false })
+      if (uploadError) throw uploadError
+
+      const submissionValues = {
+        file_name: file.name,
+        storage_path: storagePath,
+        mime_type: mimeType,
+        size_bytes: file.size,
+        submitted_at: new Date().toISOString(),
+      }
+      const { error: saveError } = oldSubmission
+        ? await supabase
+            .from('classroom_submissions')
+            .update(submissionValues)
+            .eq('id', oldSubmission.id)
+        : await supabase.from('classroom_submissions').insert({
+            ...submissionValues,
+            assignment_id: assignment.id,
+            learner_id: userId,
+          })
+      if (saveError) {
+        const { error: cleanupError } = await supabase.storage.from(classroomBucket).remove([storagePath])
+        throw new Error(cleanupError ? `${saveError.message} Temporary upload cleanup failed: ${cleanupError.message}` : saveError.message)
+      }
+      if (oldSubmission) {
+        const { error: cleanupError } = await supabase.storage
+          .from(classroomBucket)
+          .remove([oldSubmission.storage_path])
+        if (cleanupError) throw cleanupError
+      }
+      setSubmissionFiles((current) => ({ ...current, [assignment.id]: undefined }))
+      setMessage('Work submitted successfully.')
+      await loadClassroom()
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : 'Could not submit your work.')
+    } finally {
+      setSavingAction('')
+    }
+  }
+
+  const saveAttendance = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!learners.length) {
+      setError('Enroll students in this subject before recording attendance.')
+      return
+    }
+    setError('')
+    setMessage('')
+    setSavingAction('attendance')
+    const rows = learners.map((learner) => ({
+      subject_id: subject.id,
+      learner_id: learner.id,
+      attendance_date: attendanceDate,
+      status: attendance[learner.id] ?? 'present',
+      recorded_by: userId,
+    }))
+    const { error: saveError } = await supabase
+      .from('classroom_attendance')
+      .upsert(rows, { onConflict: 'subject_id,learner_id,attendance_date' })
+    if (saveError) setError(saveError.message)
+    else {
+      setMessage('Attendance saved.')
+      await loadClassroom()
+    }
+    setSavingAction('')
+  }
+
+  const markSubmission = async (
+    event: FormEvent,
+    assignment: ClassroomAssignment,
+    submission: ClassroomSubmission,
+  ) => {
+    event.preventDefault()
+    const score = Number(scoreDrafts[submission.id] ?? marks.find(
+      (mark) => mark.assignment_id === assignment.id && mark.learner_id === submission.learner_id,
+    )?.score)
+    if (!Number.isFinite(score) || score < 0 || score > assignment.max_score) {
+      setError(`Enter a score from 0 to ${assignment.max_score}.`)
+      return
+    }
+    setError('')
+    setMessage('')
+    setSavingAction(`mark:${submission.id}`)
+    const existingMark = marks.find(
+      (mark) => mark.assignment_id === assignment.id && mark.learner_id === submission.learner_id,
+    )
+    const markValues = {
+      learner_id: submission.learner_id,
+      subject_id: subject.id,
+      assignment_id: assignment.id,
+      recorded_by: userId,
+      assessment_name: assignment.title,
+      score,
+      max_score: assignment.max_score,
+      assessed_on: new Date().toISOString().slice(0, 10),
+      feedback: feedbackDrafts[submission.id] ?? existingMark?.feedback ?? '',
+    }
+    const result = existingMark
+      ? await supabase.from('marks').update(markValues).eq('id', existingMark.id)
+      : await supabase.from('marks').insert(markValues)
+    if (result.error) setError(result.error.message)
+    else {
+      setMessage(`Work marked for ${learners.find((learner) => learner.id === submission.learner_id)?.name ?? 'student'}.`)
+      await loadClassroom()
+    }
+    setSavingAction('')
+  }
+
+  return (
+    <DashboardFrame
+      eyebrow={role === 'Learner' ? 'Learner classroom' : 'Instructor classroom'}
+      title={subject.name}
+      subtitle={`${subject.level} · Syllabus ${subject.code}${archived ? ' · Archived (read only)' : ''}`}
+      action="Back"
+      onAction={onBack}
+    >
+      {error && <p role="alert" className="mb-4 rounded-lg bg-[#9b7466]/10 p-3 text-sm text-[#8a5548]">{error}</p>}
+      {message && <p role="status" className="mb-4 rounded-lg bg-[#5D866C]/10 p-3 text-sm text-[#31533d]">{message}</p>}
+      {loading ? (
+        <div className="card p-6 text-sm text-[#789083]">Loading classroom…</div>
+      ) : (
+        <div className="space-y-6">
+          <section className="card p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="font-display text-lg font-bold">Class documents</h2>
+                <p className="mt-1 text-xs text-[#789083]">PDF and Word documents, up to 10 MB each.</p>
+              </div>
+            </div>
+            {role === 'Instructor' && !archived && (
+              <form onSubmit={uploadMaterial} className="mt-5 grid gap-3 sm:grid-cols-[1fr_1.2fr_auto]">
+                <input className="form-input" value={documentTitle} onChange={(event) => setDocumentTitle(event.target.value)} maxLength={160} placeholder="Document title" required />
+                <input className="form-input" type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => setDocumentFile(event.target.files?.[0] ?? null)} required />
+                <button disabled={savingAction === 'document'} className="primary-button disabled:opacity-60">
+                  {savingAction === 'document' ? 'Uploading…' : 'Add document'}
+                </button>
+              </form>
+            )}
+            {documents.length ? (
+              <ul className="mt-4 divide-y divide-[#31533d]/8">
+                {documents.map((documentItem) => (
+                  <li key={documentItem.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold">{documentItem.title}</p>
+                      <p className="truncate text-xs text-[#789083]">{documentItem.file_name}</p>
+                    </div>
+                    <button type="button" onClick={() => void downloadFile(documentItem.storage_path, documentItem.file_name)} className="secondary-button">
+                      Download
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="mt-4 text-sm text-[#789083]">No class documents yet.</p>}
+          </section>
+
+          {role === 'Instructor' && !archived && (
+            <section className="card p-5">
+              <h2 className="font-display text-lg font-bold">Students and attendance</h2>
+              <p className="mt-1 text-xs text-[#789083]">View enrolled learners and record attendance for a class date.</p>
+              <form onSubmit={enrollLearner} className="mt-4 flex flex-wrap items-end gap-3">
+                <Field label="Add learner by registration number">
+                  <input
+                    className="form-input min-w-56"
+                    value={registrationNumber}
+                    onChange={(event) => setRegistrationNumber(event.target.value)}
+                    maxLength={60}
+                    required
+                    placeholder="Learner registration number"
+                  />
+                </Field>
+                <button disabled={savingAction === 'enrollment'} className="primary-button disabled:opacity-60">
+                  {savingAction === 'enrollment' ? 'Adding…' : 'Add student'}
+                </button>
+              </form>
+              <h3 className="mt-6 text-xs font-bold uppercase tracking-wider text-[#789083]">
+                Enrolled students ({learners.length})
+              </h3>
+              <form onSubmit={saveAttendance} className="mt-4">
+                <Field label="Attendance date">
+                  <input className="form-input max-w-xs" type="date" value={attendanceDate} onChange={(event) => setAttendanceDate(event.target.value)} required />
+                </Field>
+                {learners.length ? (
+                  <>
+                    <ul className="mt-4 divide-y divide-[#31533d]/8">
+                      {learners.map((learner) => (
+                        <li key={learner.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                          <span className="text-sm font-semibold">{learner.name}</span>
+                          <select
+                            className="form-input max-w-44"
+                            value={attendance[learner.id] ?? 'present'}
+                            onChange={(event) => setAttendance((current) => ({ ...current, [learner.id]: event.target.value as AttendanceStatus }))}
+                          >
+                            <option value="present">Present</option>
+                            <option value="absent">Absent</option>
+                            <option value="late">Late</option>
+                            <option value="excused">Excused</option>
+                          </select>
+                        </li>
+                      ))}
+                    </ul>
+                    <button disabled={savingAction === 'attendance'} className="primary-button mt-4 disabled:opacity-60">
+                      {savingAction === 'attendance' ? 'Saving…' : 'Save attendance'}
+                    </button>
+                  </>
+                ) : <p className="mt-4 text-sm text-[#789083]">No students are enrolled in this subject yet.</p>}
+              </form>
+            </section>
+          )}
+
+          <section className="card p-5">
+            <h2 className="font-display text-lg font-bold">Assignments</h2>
+            <p className="mt-1 text-xs text-[#789083]">Students submit PDF or Word work; teachers can review and mark it here.</p>
+            {role === 'Instructor' && !archived && (
+              <form onSubmit={createAssignment} className="mt-5 grid gap-3 md:grid-cols-2">
+                <input className="form-input" value={assignmentTitle} onChange={(event) => setAssignmentTitle(event.target.value)} maxLength={160} placeholder="Assignment title" required />
+                <input className="form-input" type="datetime-local" value={assignmentDue} onChange={(event) => setAssignmentDue(event.target.value)} aria-label="Due date (optional)" />
+                <textarea className="form-input min-h-24 md:col-span-2" value={assignmentInstructions} onChange={(event) => setAssignmentInstructions(event.target.value)} maxLength={5000} placeholder="Instructions (optional)" />
+                <Field label="Maximum score">
+                  <input className="form-input" type="number" min="0.01" step="0.01" value={assignmentMaxScore} onChange={(event) => setAssignmentMaxScore(event.target.value)} required />
+                </Field>
+                <div className="flex items-end justify-end">
+                  <button disabled={savingAction === 'assignment'} className="primary-button disabled:opacity-60">
+                    {savingAction === 'assignment' ? 'Creating…' : 'Create assignment'}
+                  </button>
+                </div>
+              </form>
+            )}
+            {assignments.length ? (
+              <div className="mt-5 space-y-4">
+                {assignments.map((assignment) => {
+                  const mySubmission = submissions.find((item) => item.assignment_id === assignment.id && item.learner_id === userId)
+                  const assignmentSubmissions = submissions.filter((item) => item.assignment_id === assignment.id)
+                  return (
+                    <article key={assignment.id} className="rounded-xl border border-[#31533d]/10 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <h3 className="font-bold">{assignment.title}</h3>
+                          {assignment.instructions && <p className="mt-1 whitespace-pre-wrap text-sm text-[#789083]">{assignment.instructions}</p>}
+                          <p className="mt-2 text-xs text-[#789083]">
+                            Max score: {assignment.max_score}
+                            {assignment.due_at ? ` · Due ${new Date(assignment.due_at).toLocaleString()}` : ''}
+                          </p>
+                        </div>
+                      </div>
+                      {role === 'Learner' ? (
+                        <div className="mt-4 border-t border-[#31533d]/8 pt-4">
+                          {mySubmission && (
+                            <p className="mb-3 text-xs text-[#789083]">
+                              Submitted {new Date(mySubmission.submitted_at).toLocaleString()} · {mySubmission.file_name}
+                            </p>
+                          )}
+                          {!archived && (
+                            <form onSubmit={(event) => void submitWork(event, assignment)} className="flex flex-wrap items-center gap-3">
+                              <input
+                                className="form-input min-w-0 flex-1"
+                                type="file"
+                                accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                                onChange={(event) => setSubmissionFiles((current) => ({ ...current, [assignment.id]: event.target.files?.[0] }))}
+                                required={!mySubmission}
+                              />
+                              <button disabled={savingAction === `submission:${assignment.id}`} className="primary-button disabled:opacity-60">
+                                {savingAction === `submission:${assignment.id}` ? 'Submitting…' : mySubmission ? 'Replace submission' : 'Submit work'}
+                              </button>
+                            </form>
+                          )}
+                          {mySubmission && (
+                            <button type="button" onClick={() => void downloadFile(mySubmission.storage_path, mySubmission.file_name)} className="mt-3 text-xs font-bold text-[#5D866C] hover:underline">
+                              Download my submission
+                            </button>
+                          )}
+                          {marks.find((mark) => mark.assignment_id === assignment.id && mark.learner_id === userId) && (
+                            <p className="mt-3 rounded-lg bg-[#5D866C]/10 p-3 text-sm">
+                              Mark: {marks.find((mark) => mark.assignment_id === assignment.id && mark.learner_id === userId)?.score} / {assignment.max_score}
+                              {marks.find((mark) => mark.assignment_id === assignment.id && mark.learner_id === userId)?.feedback
+                                ? ` · ${marks.find((mark) => mark.assignment_id === assignment.id && mark.learner_id === userId)?.feedback}`
+                                : ''}
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="mt-4 border-t border-[#31533d]/8 pt-4">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-[#789083]">
+                            Submissions ({assignmentSubmissions.length})
+                          </h4>
+                          {assignmentSubmissions.length ? (
+                            <ul className="mt-3 divide-y divide-[#31533d]/8">
+                              {assignmentSubmissions.map((submission) => {
+                                const learner = learners.find((item) => item.id === submission.learner_id)
+                                const mark = marks.find((item) => item.assignment_id === assignment.id && item.learner_id === submission.learner_id)
+                                return (
+                                  <li key={submission.id} className="py-4">
+                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                      <div>
+                                        <p className="text-sm font-bold">{learner?.name ?? 'Enrolled student'}</p>
+                                        <p className="text-xs text-[#789083]">{submission.file_name} · {new Date(submission.submitted_at).toLocaleString()}</p>
+                                      </div>
+                                      <button type="button" onClick={() => void downloadFile(submission.storage_path, submission.file_name)} className="secondary-button">
+                                        Download work
+                                      </button>
+                                    </div>
+                                    {!archived && (
+                                      <form onSubmit={(event) => void markSubmission(event, assignment, submission)} className="mt-3 grid gap-3 sm:grid-cols-[140px_1fr_auto]">
+                                        <input
+                                          className="form-input"
+                                          type="number"
+                                          min="0"
+                                          max={assignment.max_score}
+                                          step="0.01"
+                                          value={scoreDrafts[submission.id] ?? mark?.score ?? ''}
+                                          onChange={(event) => setScoreDrafts((current) => ({ ...current, [submission.id]: event.target.value }))}
+                                          placeholder={`/${assignment.max_score}`}
+                                          required
+                                        />
+                                        <input
+                                          className="form-input"
+                                          value={feedbackDrafts[submission.id] ?? mark?.feedback ?? ''}
+                                          onChange={(event) => setFeedbackDrafts((current) => ({ ...current, [submission.id]: event.target.value }))}
+                                          maxLength={2000}
+                                          placeholder="Feedback (optional)"
+                                        />
+                                        <button disabled={savingAction === `mark:${submission.id}`} className="primary-button disabled:opacity-60">
+                                          {savingAction === `mark:${submission.id}` ? 'Saving…' : mark ? 'Update mark' : 'Mark work'}
+                                        </button>
+                                      </form>
+                                    )}
+                                  </li>
+                                )
+                              })}
+                            </ul>
+                          ) : <p className="mt-3 text-sm text-[#789083]">No work submitted yet.</p>}
+                        </div>
+                      )}
+                    </article>
+                  )
+                })}
+              </div>
+            ) : <p className="mt-4 text-sm text-[#789083]">No assignments have been added.</p>}
+          </section>
+        </div>
+      )}
     </DashboardFrame>
   )
 }
@@ -2532,27 +3547,31 @@ function LoginPage({
             {submitting ? 'Please wait…' : mode === 'signin' ? 'Sign in' : 'Create account'}
           </button>
           </form>
-          <p className="mt-6 text-center text-sm text-[#789083]">
-            {mode === 'signin' ? 'New to St Dzikaz Academy?' : 'Already have an account?'}{' '}
-            <button
-              type="button"
-              onClick={() => {
-                const nextMode = mode === 'signin' ? 'signup' : 'signin'
-                setMode(nextMode)
-                if (nextMode === 'signup') {
-                  setLoginRole('learner')
-                  onRoleChange('learner')
-                }
-                setError('')
-                setMessage('')
-              }}
-              className="font-bold text-[#5D866C] hover:underline"
-            >
-              {mode === 'signin' ? 'Create a learner account' : 'Sign in'}
-            </button>
-          </p>
+          {loginRole === 'learner' && (
+            <p className="mt-6 text-center text-sm text-[#789083]">
+              {mode === 'signin' ? 'New to St Dzikaz Academy?' : 'Already have an account?'}{' '}
+              <button
+                type="button"
+                onClick={() => {
+                  const nextMode = mode === 'signin' ? 'signup' : 'signin'
+                  setMode(nextMode)
+                  if (nextMode === 'signup') {
+                    setLoginRole('learner')
+                    onRoleChange('learner')
+                  }
+                  setError('')
+                  setMessage('')
+                }}
+                className="font-bold text-[#5D866C] hover:underline"
+              >
+                {mode === 'signin' ? 'Create a learner account' : 'Sign in'}
+              </button>
+            </p>
+          )}
           <p className="mt-5 text-center text-[10px] text-[#98a19c]">
-            Instructor and administrator accounts are created by academy administrators. Admins can sign in at /admin/.
+            {loginRole === 'admin'
+              ? 'Need an admin account? Ask an existing administrator to add you from User management.'
+              : 'Instructor and administrator accounts are created by academy administrators.'}
           </p>
         </div>
       </section>
@@ -2839,6 +3858,7 @@ export default function App() {
         setAuthError(`This account is not registered as a ${roleName?.toLowerCase() ?? 'matching'} account.`)
         const { error: signOutError } = await supabase.auth.signOut()
         if (signOutError) setAuthError(`Account type does not match. Sign-out failed: ${signOutError.message}`)
+        setAuthUser(null)
         setProfileReady(true)
         return
       }
@@ -2947,6 +3967,12 @@ export default function App() {
   const renderContent = () => {
     if (role === 'Admin' && active === 'User management')
       return <AdminUsersPage supabase={supabase} />
+    if (
+      (role === 'Learner' && (active === 'My learning' || active === 'Classrooms')) ||
+      (role === 'Instructor' && active === 'Classrooms')
+    ) {
+      return <ClassroomsPage role={role} userId={authUser.id} supabase={supabase} />
+    }
     if (active === 'Notice board')
       return <NoticeBoard role={role} notices={notices} setNotices={setNotices} userId={authUser.id} supabase={supabase} />
     if (active === 'Calendar')
