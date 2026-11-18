@@ -989,10 +989,10 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
   const [removingUserId, setRemovingUserId] = useState('')
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
   const [role, setRole] = useState<'learner' | 'instructor' | 'admin'>('learner')
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [generatedPassword, setGeneratedPassword] = useState('')
   const [saving, setSaving] = useState(false)
 
   const loadUsers = useCallback(async (page = 1, append = false) => {
@@ -1048,6 +1048,7 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
     event.preventDefault()
     setError('')
     setMessage('')
+    setGeneratedPassword('')
 
     const { data: { session }, error: sessionError } = await supabase.auth.getSession()
     if (sessionError) {
@@ -1067,7 +1068,7 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
           Authorization: `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ fullName, email, password, role }),
+        body: JSON.stringify({ fullName, email, role }),
       })
       const result: unknown = await response.json()
       if (!response.ok) {
@@ -1081,12 +1082,17 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
         throw new Error(errorMessage)
       }
 
-      setMessage(
-        `Account created for ${email.trim()}. Share the temporary password securely; the user must change it after signing in.`,
-      )
+      const responseBody =
+        typeof result === 'object' && result !== null
+          ? (result as Record<string, unknown>)
+          : {}
+      if (typeof responseBody.temporaryPassword !== 'string') {
+        throw new Error('The account was created, but its temporary password was not returned.')
+      }
+      setGeneratedPassword(responseBody.temporaryPassword)
+      setMessage(`Account created for ${email.trim()}. Share this temporary password securely.`)
       setFullName('')
       setEmail('')
-      setPassword('')
       setRole('learner')
       await loadUsers()
     } catch (requestError) {
@@ -1172,17 +1178,6 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
               placeholder="name@gmail.com"
             />
           </Field>
-          <Field label="Temporary password">
-            <input
-              className="form-input"
-              type="password"
-              autoComplete="new-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              minLength={8}
-              required
-            />
-          </Field>
           <Field label="Academy role">
             <select
               className="form-input"
@@ -1203,9 +1198,17 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
           </p>
         )}
         {message && (
-          <p role="status" className="rounded-lg bg-[#5D866C]/10 p-3 text-xs text-[#31533d]">
-            {message}
-          </p>
+          <div role="status" className="rounded-lg bg-[#5D866C]/10 p-3 text-xs text-[#31533d]">
+            <p>{message}</p>
+            {generatedPassword && (
+              <>
+                <p className="mt-2 break-all rounded bg-white/70 p-2 font-mono select-all">
+                  {generatedPassword}
+                </p>
+                <p className="mt-2">The user must change it after signing in.</p>
+              </>
+            )}
+          </div>
         )}
         <button disabled={saving} className="primary-button disabled:opacity-60">
           {saving ? 'Creating account…' : 'Add user'}

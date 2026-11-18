@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 
@@ -111,7 +112,6 @@ export async function POST(request: Request) {
   const values = body as Record<string, unknown>
   const fullName = typeof values.fullName === 'string' ? values.fullName.trim() : ''
   const email = typeof values.email === 'string' ? values.email.trim().toLowerCase() : ''
-  const password = typeof values.password === 'string' ? values.password : ''
   const role = values.role
 
   if (!fullName || fullName.length > 120) {
@@ -120,21 +120,22 @@ export async function POST(request: Request) {
   if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return jsonError('Enter a valid email address.', 400)
   }
-  if (password.length < 8 || password.length > 128) {
-    return jsonError('Use a temporary password between 8 and 128 characters.', 400)
-  }
   if (!isAcademyRole(role)) return jsonError('Choose a valid academy role.', 400)
 
+  const temporaryPassword = randomBytes(24).toString('base64url')
   const { data, error } = await authorization.context.adminClient.auth.admin.createUser({
     email,
-    password,
+    password: temporaryPassword,
     email_confirm: true,
     user_metadata: { full_name: fullName, requires_password_change: true },
     app_metadata: { role },
   })
   if (error) return jsonError(error.message, 400)
 
-  return NextResponse.json({ id: data.user.id, email: data.user.email, role }, { status: 201 })
+  return NextResponse.json(
+    { id: data.user.id, email: data.user.email, role, temporaryPassword },
+    { status: 201 },
+  )
 }
 
 export async function DELETE(request: Request) {

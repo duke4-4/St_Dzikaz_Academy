@@ -42,7 +42,7 @@ begin
     requested_username,
     coalesce(nullif(trim(new.raw_user_meta_data ->> 'full_name'), ''), requested_username),
     requested_role,
-    (new.raw_user_meta_data ->> 'requires_password_change') = 'true'
+    coalesce((new.raw_user_meta_data ->> 'requires_password_change') = 'true', false)
   );
 
   if requested_role = 'learner' then
