@@ -211,6 +211,7 @@ const navByRole: Record<Role, { label: string; icon: IconName }[]> = {
   Admin: [
     { label: 'Overview', icon: 'home' },
     { label: 'User management', icon: 'users' },
+    { label: 'Settings', icon: 'settings' },
     { label: 'Notice board', icon: 'bell' },
     { label: 'Calendar', icon: 'calendar' },
   ],
@@ -235,10 +236,13 @@ type Subject = {
 
 type Profile = {
   name: string
+  username: string
+  bio: string
   email: string
   school: string
   phone: string
   image?: string
+  avatarFile?: File
 }
 
 type ManagedUser = {
@@ -273,22 +277,28 @@ function isClassroomLearnerProfile(
 
 const profileDefaults: Record<Role, Profile> = {
   Learner: {
-    name: 'Amara Moyo',
-    email: 'amara@dzikaz.ac.zw',
-    school: 'Harare High School',
-    phone: '+263 77 245 8190',
+    name: '',
+    username: '',
+    bio: '',
+    email: '',
+    school: '',
+    phone: '',
   },
   Instructor: {
-    name: 'Caleb Kunda',
-    email: 'caleb@dzikaz.ac.zw',
-    school: 'St Dzikaz Academy',
-    phone: '+263 71 820 4412',
+    name: '',
+    username: '',
+    bio: '',
+    email: '',
+    school: '',
+    phone: '',
   },
   Admin: {
-    name: 'Tina Ncube',
-    email: 'tina@dzikaz.ac.zw',
-    school: 'St Dzikaz Academy',
-    phone: '+263 78 106 9023',
+    name: '',
+    username: '',
+    bio: '',
+    email: '',
+    school: '',
+    phone: '',
   },
 }
 
@@ -315,14 +325,14 @@ const initialSubjects: Subject[] = [
   { id: 'cs', name: 'Computer Science', level: 'O Level', code: '7014', learners: 126 },
 ]
 
-function Logo({ compact = false }: { compact?: boolean }) {
+function Logo({ compact = false, academyName = 'St Dzikaz Academy' }: { compact?: boolean; academyName?: string }) {
   return (
     <div className="flex items-center gap-3">
       <LogoImage className="h-10 w-10 shrink-0 rounded-xl" />
       {!compact && (
         <div>
           <div className="font-display text-lg font-bold leading-none tracking-tight">
-            St Dzikaz Academy
+            {academyName}
           </div>
           <div className="mt-1 text-[10px] uppercase tracking-[.18em] text-white/55">
             Reaching learning heights
@@ -338,6 +348,7 @@ function Sidebar({
   active,
   setActive,
   profile,
+  academyName,
   onProfile,
   onLogout,
 }: {
@@ -345,13 +356,14 @@ function Sidebar({
   active: string
   setActive: (v: string) => void
   profile: Profile
+  academyName: string
   onProfile: () => void
   onLogout: () => void
 }) {
   return (
     <aside className="sidebar fixed inset-y-0 left-0 z-40 hidden w-[250px] flex-col bg-[#5D866C] px-4 py-6 text-white lg:flex">
       <div className="px-2">
-        <Logo />
+        <Logo academyName={academyName} />
       </div>
       <nav className="mt-12 flex-1 space-y-1.5">
         <p className="px-3 pb-2 text-[10px] font-bold uppercase tracking-[.18em] text-white/45">
@@ -426,11 +438,13 @@ function Avatar({
 function Header({
   role,
   profile,
+  academyName,
   onProfile,
   onNavigate,
 }: {
   role: Role
   profile: Profile
+  academyName: string
   onProfile: () => void
   onNavigate: (page: string) => void
 }) {
@@ -445,8 +459,8 @@ function Header({
   return (
     <header className="sticky top-0 z-30 flex h-[76px] items-center justify-between border-b border-[#31533d]/10 bg-[#F5F5F0]/90 px-5 backdrop-blur-md md:px-8">
       <div className="flex items-center gap-3 lg:hidden">
-        <Logo compact />
-        <span className="font-display font-bold text-[#31533d]">St Dzikaz</span>
+        <Logo compact academyName={academyName} />
+        <span className="font-display max-w-36 truncate font-bold text-[#31533d]">{academyName}</span>
       </div>
       <form
         onSubmit={(event) => {
@@ -539,15 +553,31 @@ function StatCard({
   )
 }
 
-function SectionTitle({ title, action }: { title: string; action?: string }) {
+function SectionTitle({
+  title,
+  action,
+  onAction,
+}: {
+  title: string
+  action?: string
+  onAction?: () => void
+}) {
   return (
     <div className="mb-4 flex items-center justify-between">
       <h2 className="font-display text-lg font-bold tracking-tight text-[#284633]">{title}</h2>
       {action && (
-        <button className="flex items-center gap-1 text-xs font-bold text-[#5D866C] hover:text-[#31533d]">
-          {action}
-          <Icon name="chevron" size={14} />
-        </button>
+        onAction ? (
+          <button
+            type="button"
+            onClick={onAction}
+            className="flex items-center gap-1 text-xs font-bold text-[#5D866C] hover:text-[#31533d]"
+          >
+            {action}
+            <Icon name="chevron" size={14} />
+          </button>
+        ) : (
+          <span className="text-xs font-semibold text-[#789083]">{action}</span>
+        )
       )}
     </div>
   )
@@ -582,206 +612,129 @@ function ProgressRing({ value, size = 76 }: { value: number; size?: number }) {
 const featuredCourseKey = 'data-analyst-python'
 const featuredCourseLessons = 9
 
-function LearnerDashboard({
-  name,
-  userId,
-  supabase,
-}: {
-  name: string
-  userId: string
-  supabase: SupabaseClient
-}) {
+function LearnerDashboard({ name, userId, supabase }: { name: string; userId: string; supabase: SupabaseClient }) {
   const [completedLessons, setCompletedLessons] = useState(0)
   const [progressLoading, setProgressLoading] = useState(true)
   const [progressSaving, setProgressSaving] = useState(false)
   const [progressError, setProgressError] = useState('')
+  const [enrolledSubjects, setEnrolledSubjects] = useState<{ id: string; name: string; level: string; code: string }[]>([])
+  const [marksCount, setMarksCount] = useState(0)
+  const [learningTab, setLearningTab] = useState<'overview' | 'subjects' | 'progress'>('overview')
+  const [subjectSearch, setSubjectSearch] = useState('')
+  const [subjectLevel, setSubjectLevel] = useState('all')
+  const [dashboardLoading, setDashboardLoading] = useState(true)
+  const [dashboardError, setDashboardError] = useState('')
 
   useEffect(() => {
     let active = true
-    const loadProgress = async () => {
-      const { data, error } = await supabase
-        .from('learning_progress')
-        .select('completed_lessons')
-        .eq('profile_id', userId)
-        .eq('course_key', featuredCourseKey)
-        .maybeSingle()
-
+    const loadOverview = async () => {
+      const [progress, enrollments, marks] = await Promise.all([
+        supabase.from('learning_progress').select('completed_lessons').eq('profile_id', userId).eq('course_key', featuredCourseKey).maybeSingle(),
+        supabase.from('enrollments').select('subject_id').eq('learner_id', userId),
+        supabase.from('marks').select('id', { count: 'exact', head: true }).eq('learner_id', userId),
+      ])
       if (!active) return
-      if (error) {
-        setProgressError(`Could not load lesson progress: ${error.message}`)
-      } else if (data) {
-        setCompletedLessons(data.completed_lessons)
+      if (progress.error) setProgressError(`Could not load lesson progress: ${progress.error.message}`)
+      else if (progress.data) setCompletedLessons(progress.data.completed_lessons)
+      if (enrollments.error) setDashboardError(enrollments.error.message)
+      else if (marks.error) setDashboardError(marks.error.message)
+      else {
+        const subjectIds = [...new Set((enrollments.data ?? []).map((item) => item.subject_id))]
+        if (subjectIds.length) {
+          const { data, error } = await supabase.from('subjects').select('id, name, level, code').in('id', subjectIds)
+          if (!active) return
+          if (error) setDashboardError(error.message)
+          else setEnrolledSubjects(data ?? [])
+        }
+        setMarksCount(marks.count ?? 0)
       }
       setProgressLoading(false)
+      setDashboardLoading(false)
     }
-    void loadProgress()
-    return () => {
-      active = false
-    }
+    void loadOverview()
+    return () => { active = false }
   }, [supabase, userId])
 
   const completeNextLesson = async () => {
     if (progressSaving || completedLessons >= featuredCourseLessons) return
-    const nextCompletedLessons = completedLessons + 1
+    const nextCount = completedLessons + 1
     setProgressSaving(true)
     setProgressError('')
     const { error } = await supabase.from('learning_progress').upsert(
-      {
-        profile_id: userId,
-        course_key: featuredCourseKey,
-        completed_lessons: nextCompletedLessons,
-      },
+      { profile_id: userId, course_key: featuredCourseKey, completed_lessons: nextCount },
       { onConflict: 'profile_id,course_key' },
     )
-    if (error) {
-      setProgressError(`Could not save lesson progress: ${error.message}`)
-    } else {
-      setCompletedLessons(nextCompletedLessons)
-    }
+    if (error) setProgressError(`Could not save lesson progress: ${error.message}`)
+    else setCompletedLessons(nextCount)
     setProgressSaving(false)
   }
 
   const courseProgress = Math.round((completedLessons / featuredCourseLessons) * 100)
-  return (
-    <DashboardFrame
-      eyebrow="Learner dashboard"
-      title={`Good morning, ${name}`}
-      subtitle="Your next learning milestone is closer than you think."
-    >
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          label="Current streak"
-          value="12 days"
-          detail="Personal best: 18 days"
-          icon="trend"
-          accent
-        />
-        <StatCard label="Hours learned" value="28.5" detail="+4.2 hours this week" icon="clock" />
-        <StatCard label="Courses active" value="4" detail="2 lessons due today" icon="book" />
-        <StatCard label="Certificates" value="7" detail="Latest earned 6 days ago" icon="award" />
+  const visibleSubjects = enrolledSubjects.filter((subject) => {
+    const query = subjectSearch.trim().toLowerCase()
+    const matchesQuery = `${subject.name} ${subject.code} ${subject.level}`.toLowerCase().includes(query)
+    return matchesQuery && (subjectLevel === 'all' || subject.level === subjectLevel)
+  })
+  const learningTabs = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'subjects', label: 'My subjects' },
+    { id: 'progress', label: 'Learning progress' },
+  ] as const
+  const progressCard = (
+    <div className="card overflow-hidden">
+      <div className="grid md:grid-cols-[190px_1fr]">
+        <div className="relative flex min-h-44 items-end overflow-hidden bg-[#31533d] p-5 text-white">
+          <div className="absolute -right-10 -top-12 h-36 w-36 rounded-full border-[22px] border-[#C2A68C]/35" />
+          <div className="absolute right-9 top-14 h-24 w-24 rotate-45 border-2 border-[#E6D8C3]/40" />
+          <div className="relative"><span className="rounded-md bg-[#E6D8C3] px-2 py-1 text-[9px] font-extrabold uppercase tracking-wider text-[#31533d]">Self-paced</span><p className="font-display mt-3 text-xl font-bold leading-tight">Lesson progress</p></div>
+        </div>
+        <div className="p-5 md:p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div><p className="text-xs font-bold text-[#5D866C]">{completedLessons >= featuredCourseLessons ? 'All lessons complete' : `Lesson ${completedLessons + 1} of ${featuredCourseLessons}`}</p><h3 className="font-display mt-1 text-xl font-bold text-[#284633]">Your independent learning track</h3></div>
+            <ProgressRing value={courseProgress} size={70} />
+          </div>
+          <p className="mt-3 max-w-xl text-sm leading-6 text-[#708277]">Record lessons as you complete them. Progress is saved to your account and restored when you return.</p>
+          <button type="button" onClick={() => void completeNextLesson()} disabled={progressLoading || progressSaving || completedLessons >= featuredCourseLessons} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#5D866C] px-5 py-3 text-xs font-bold text-white shadow-sm transition hover:bg-[#4d765c] disabled:cursor-not-allowed disabled:opacity-60">
+            <Icon name={completedLessons >= featuredCourseLessons ? 'check' : 'play'} size={16} />
+            {progressLoading ? 'Loading progress…' : progressSaving ? 'Saving…' : completedLessons >= featuredCourseLessons ? 'Track complete' : 'Mark next lesson complete'}
+          </button>
+          {progressError && <p role="alert" className="mt-3 text-xs text-[#8a5548]">{progressError}</p>}
+        </div>
       </div>
-      <div className="mt-6 grid gap-6 xl:grid-cols-[1.6fr_1fr]">
-        <div>
-          <SectionTitle title="Continue learning" action="View all courses" />
-          <div className="card overflow-hidden">
-            <div className="grid md:grid-cols-[220px_1fr]">
-              <div className="course-art relative flex min-h-48 items-end overflow-hidden bg-[#31533d] p-5 text-white">
-                <div className="absolute -right-8 -top-10 h-36 w-36 rounded-full border-[22px] border-[#C2A68C]/35" />
-                <div className="absolute right-10 top-14 h-24 w-24 rotate-45 border-2 border-[#E6D8C3]/40" />
-                <div className="relative">
-                  <span className="rounded-md bg-[#E6D8C3] px-2 py-1 text-[9px] font-extrabold uppercase tracking-wider text-[#31533d]">
-                    Career track
-                  </span>
-                  <p className="font-display mt-3 text-xl font-bold leading-tight">
-                    Data Analyst
-                    <br />
-                    with Python
-                  </p>
-                </div>
-              </div>
-              <div className="p-5 md:p-6">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-xs font-bold text-[#5D866C]">
-                      {completedLessons >= featuredCourseLessons
-                        ? 'All lessons complete'
-                        : `Lesson ${completedLessons + 1} of ${featuredCourseLessons}`}
-                    </p>
-                    <h3 className="font-display mt-1 text-xl font-bold text-[#284633]">
-                      Transforming DataFrames
-                    </h3>
-                  </div>
-                  <ProgressRing value={courseProgress} size={70} />
-                </div>
-                <p className="mt-3 max-w-xl text-sm leading-6 text-[#708277]">
-                  Practice filtering, sorting, and grouping real-world datasets with pandas.
-                </p>
-                <button
-                  onClick={() => void completeNextLesson()}
-                  disabled={progressLoading || progressSaving || completedLessons >= featuredCourseLessons}
-                  className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#5D866C] px-5 py-3 text-xs font-bold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-[#4d765c] disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <Icon name={completedLessons >= featuredCourseLessons ? 'check' : 'play'} size={16} />
-                  {progressLoading
-                    ? 'Loading progress…'
-                    : progressSaving
-                      ? 'Saving…'
-                      : completedLessons >= featuredCourseLessons
-                        ? 'Course complete'
-                        : completedLessons === 0
-                          ? 'Mark first lesson complete'
-                          : 'Mark next lesson complete'}
-                </button>
-                {progressError && <p role="alert" className="mt-3 text-xs text-[#8a5548]">{progressError}</p>}
-              </div>
-            </div>
-          </div>
-          <div className="mt-6">
-            <SectionTitle title="Recommended for you" action="Explore library" />
-            <div className="grid gap-4 sm:grid-cols-2">
-              <CourseMini
-                title="SQL for Data Analysis"
-                tag="Data"
-                lessons="18 lessons"
-                tone="green"
-              />
-              <CourseMini
-                title="Presenting with Impact"
-                tag="Business"
-                lessons="12 lessons"
-                tone="sand"
-              />
-            </div>
-          </div>
+    </div>
+  )
+
+  return (
+    <DashboardFrame eyebrow="Learner dashboard" title={`Good morning, ${name}`} subtitle="Your learning activity and enrolled subjects, all in one place.">
+      {dashboardError && <p role="alert" className="mb-5 rounded-lg bg-[#9b7466]/10 p-3 text-sm text-[#8a5548]">Could not load some learning information: {dashboardError}</p>}
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <StatCard label="Enrolled subjects" value={dashboardLoading ? '…' : enrolledSubjects.length.toLocaleString()} detail="Current subject enrollments" icon="book" accent />
+        <StatCard label="Marks recorded" value={dashboardLoading ? '…' : marksCount.toLocaleString()} detail="Assessment results available to you" icon="chart" />
+        <StatCard label="Lessons completed" value={progressLoading ? '…' : `${completedLessons} / ${featuredCourseLessons}`} detail={`${courseProgress}% of your independent learning track`} icon="check" />
+      </div>
+      <div className="mt-7 border-b border-[#31533d]/15">
+        <div role="tablist" aria-label="Learner overview sections" className="flex flex-wrap gap-2">
+          {learningTabs.map((item) => <button key={item.id} type="button" role="tab" aria-selected={learningTab === item.id} onClick={() => setLearningTab(item.id)} className={`rounded-t-xl border-b-2 px-4 py-3 text-sm font-bold transition ${learningTab === item.id ? 'border-[#5D866C] bg-white text-[#31533d]' : 'border-transparent text-[#789083] hover:text-[#31533d]'}`}>{item.label}</button>)}
         </div>
-        <div>
-          <SectionTitle title="This week" />
-          <div className="card p-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-[#789083]">Weekly goal</p>
-                <p className="font-display mt-1 text-2xl font-bold text-[#284633]">
-                  3h 45m <span className="text-sm font-medium text-[#789083]">/ 5h</span>
-                </p>
-              </div>
-              <span className="rounded-lg bg-[#E6D8C3]/55 px-2.5 py-1 text-[10px] font-bold text-[#5D866C]">
-                75% complete
-              </span>
-            </div>
-            <div className="mt-6 flex h-32 items-end justify-between gap-2">
-              {[34, 58, 42, 80, 66, 25, 12].map((h, i) => (
-                <div className="flex flex-1 flex-col items-center gap-2" key={i}>
-                  <div className="relative h-24 w-full max-w-5 rounded-full bg-[#E6D8C3]/45">
-                    <div
-                      className={`absolute inset-x-0 bottom-0 rounded-full ${i === 3 ? 'bg-[#5D866C]' : 'bg-[#C2A68C]'}`}
-                      style={{ height: `${h}%` }}
-                    />
-                  </div>
-                  <span className="text-[9px] font-bold text-[#829188]">{'MTWTFSS'[i]}</span>
-                </div>
-              ))}
-            </div>
+      </div>
+      <div className="mt-6">
+        {learningTab === 'overview' && <div role="tabpanel" className="grid gap-6 xl:grid-cols-[1.4fr_1fr]">
+          <div><div className="mb-4 flex items-center justify-between gap-4"><div><h2 className="font-display text-lg font-bold text-[#284633]">Your subjects</h2><p className="mt-1 text-xs text-[#789083]">Subjects you are enrolled in.</p></div><button type="button" onClick={() => setLearningTab('subjects')} className="text-xs font-bold text-[#5D866C] hover:text-[#31533d]">View all →</button></div>
+            <div className="card divide-y divide-[#31533d]/8">{enrolledSubjects.slice(0, 4).map((subject) => <div key={subject.id} className="flex items-center justify-between gap-4 px-5 py-4"><div><p className="text-sm font-bold text-[#284633]">{subject.name}</p><p className="mt-1 text-[10px] text-[#789083]">{subject.code}</p></div><span className="rounded-full bg-[#E6D8C3]/45 px-3 py-1 text-[10px] font-bold text-[#5D866C]">{subject.level}</span></div>)}{!enrolledSubjects.length && <p className="p-5 text-sm text-[#789083]">{dashboardLoading ? 'Loading enrolled subjects…' : 'You are not enrolled in any subjects yet.'}</p>}</div>
           </div>
-          <div className="card mt-4 p-5">
-            <SectionTitle title="Upcoming" />
-            <Timeline
-              time="Today, 14:00"
-              title="Python skill assessment"
-              type="Assessment · 25 min"
-            />
-            <Timeline
-              time="Tomorrow, 09:30"
-              title="Live career workshop"
-              type="Live session · 60 min"
-              last
-            />
+          <div><div className="mb-4"><h2 className="font-display text-lg font-bold text-[#284633]">Learning progress</h2><p className="mt-1 text-xs text-[#789083]">Pick up where you left off.</p></div>{progressCard}</div>
+        </div>}
+        {learningTab === 'subjects' && <section role="tabpanel">
+          <div className="mb-5 flex flex-wrap items-end justify-between gap-4"><div><h2 className="font-display text-xl font-bold text-[#284633]">My subjects</h2><p className="mt-1 text-sm text-[#789083]">{visibleSubjects.length} of {enrolledSubjects.length} enrolled subjects</p></div>
+            <div className="flex flex-wrap gap-3"><label className="relative"><span className="sr-only">Search subjects</span><Icon name="search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#789083]" /><input className="form-input pl-9" value={subjectSearch} onChange={(event) => setSubjectSearch(event.target.value)} placeholder="Search subjects" /></label><label><span className="sr-only">Filter by level</span><select className="form-input min-w-36" value={subjectLevel} onChange={(event) => setSubjectLevel(event.target.value)}><option value="all">All levels</option><option value="O Level">O Level</option><option value="A Level">A Level</option></select></label></div>
           </div>
-        </div>
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{visibleSubjects.map((subject) => <article key={subject.id} className="card p-5"><div className="flex items-start justify-between gap-3"><span className="grid h-10 w-10 place-items-center rounded-xl bg-[#E6D8C3]/55 text-[#5D866C]"><Icon name="book" /></span><span className="rounded-full bg-[#5D866C]/10 px-3 py-1 text-[10px] font-bold text-[#5D866C]">{subject.level}</span></div><h3 className="font-display mt-5 text-lg font-bold text-[#284633]">{subject.name}</h3><p className="mt-1 text-xs text-[#789083]">Syllabus code {subject.code}</p></article>)}{!visibleSubjects.length && <p className="card p-5 text-sm text-[#789083]">{dashboardLoading ? 'Loading subjects…' : 'No subjects match those filters.'}</p>}</div>
+        </section>}
+        {learningTab === 'progress' && <section role="tabpanel" className="mx-auto max-w-3xl">{progressCard}</section>}
       </div>
     </DashboardFrame>
   )
 }
-
 function InstructorDashboard() {
   return (
     <DashboardFrame
@@ -916,82 +869,199 @@ function InstructorDashboard() {
   )
 }
 
-function AdminDashboard() {
+type AdminOverviewData = {
+  totals: { users: number; learners: number; instructors: number; admins: number; subjects: number; enrollments: number }
+  monthlySignups: { label: string; count: number }[]
+  topSubjects: { id: string; name: string; level: string; enrollments: number }[]
+  recentUsers: { id: string; name: string; role: string; createdAt: string }[]
+}
+
+function AdminDashboard({
+  supabase,
+  onManageUsers,
+}: {
+  supabase: SupabaseClient
+  onManageUsers: () => void
+}) {
+  const [overview, setOverview] = useState<AdminOverviewData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  const loadOverview = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const roleCounts = await Promise.all(
+        (['learner', 'instructor', 'admin'] as const).map(async (role) => {
+          const result = await supabase
+            .from('profiles')
+            .select('id', { count: 'exact', head: true })
+            .eq('role', role)
+          if (result.error) throw result.error
+          return result.count ?? 0
+        }),
+      )
+      const [userCountResult, enrollmentCountResult, subjectsResult, recentUsersResult] =
+        await Promise.all([
+          supabase.from('profiles').select('id', { count: 'exact', head: true }),
+          supabase.from('enrollments').select('id', { count: 'exact', head: true }),
+          supabase.from('subjects').select('id, name, level, archived_at').is('archived_at', null),
+          supabase
+            .from('profiles')
+            .select('id, full_name, username, role, created_at')
+            .order('created_at', { ascending: false })
+            .limit(5),
+        ])
+      if (userCountResult.error) throw userCountResult.error
+      if (enrollmentCountResult.error) throw enrollmentCountResult.error
+      if (subjectsResult.error) throw subjectsResult.error
+      if (recentUsersResult.error) throw recentUsersResult.error
+
+      const now = new Date()
+      const months = Array.from({ length: 6 }, (_, index) => {
+        const month = new Date(now.getFullYear(), now.getMonth() - 5 + index, 1)
+        const nextMonth = new Date(now.getFullYear(), now.getMonth() - 4 + index, 1)
+        return { month, nextMonth }
+      })
+      const monthlySignups = await Promise.all(
+        months.map(async ({ month, nextMonth }) => {
+          const result = await supabase
+            .from('profiles')
+            .select('id', { count: 'exact', head: true })
+            .gte('created_at', month.toISOString())
+            .lt('created_at', nextMonth.toISOString())
+          if (result.error) throw result.error
+          return {
+            label: month.toLocaleDateString('en-ZW', { month: 'short' }),
+            count: result.count ?? 0,
+          }
+        }),
+      )
+
+      const subjectsWithCounts = await Promise.all(
+        (subjectsResult.data ?? []).map(async (subject) => {
+          const result = await supabase
+            .from('enrollments')
+            .select('id', { count: 'exact', head: true })
+            .eq('subject_id', subject.id)
+          if (result.error) throw result.error
+          return {
+            id: subject.id,
+            name: subject.name,
+            level: subject.level,
+            enrollments: result.count ?? 0,
+          }
+        }),
+      )
+      setOverview({
+        totals: {
+          users: userCountResult.count ?? 0,
+          learners: roleCounts[0],
+          instructors: roleCounts[1],
+          admins: roleCounts[2],
+          subjects: subjectsWithCounts.length,
+          enrollments: enrollmentCountResult.count ?? 0,
+        },
+        monthlySignups,
+        topSubjects: subjectsWithCounts.sort((a, b) => b.enrollments - a.enrollments),
+        recentUsers: (recentUsersResult.data ?? []).map((user) => ({
+          id: user.id,
+          name: user.full_name || user.username,
+          role: user.role,
+          createdAt: user.created_at,
+        })),
+      })
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Could not load live academy data.')
+    } finally {
+      setLoading(false)
+    }
+  }, [supabase])
+
+  useEffect(() => {
+    void loadOverview()
+  }, [loadOverview])
+
   const downloadReport = () => {
-    const report =
-      'Metric,Value\nTotal users,8492\nCourse enrollments,3840\nCompletion rate,78.2%\nLearning hours,12800\n'
-    const url = URL.createObjectURL(new Blob([report], { type: 'text/csv' }))
+    if (!overview) return
+    const escapeCsv = (value: string | number) => `"${String(value).replaceAll('"', '""')}"`
+    const rows = [
+      ['Metric', 'Value'],
+      ['Total users', overview.totals.users],
+      ['Learners', overview.totals.learners],
+      ['Instructors', overview.totals.instructors],
+      ['Administrators', overview.totals.admins],
+      ['Active subjects', overview.totals.subjects],
+      ['Course enrollments', overview.totals.enrollments],
+      ['', ''],
+      ['Month', 'New accounts'],
+      ...overview.monthlySignups.map(({ label, count }) => [label, count] as [string, number]),
+      ['', ''],
+      ['Subject', 'Level', 'Enrollments'],
+      ...overview.topSubjects.map(({ name, level, enrollments }) => [name, level, enrollments]),
+    ]
+    const report = rows.map((row) => row.map(escapeCsv).join(',')).join('\r\n')
+    const url = URL.createObjectURL(new Blob([report], { type: 'text/csv;charset=utf-8' }))
     const link = document.createElement('a')
     link.href = url
     link.download = 'dzikaz-academy-report.csv'
     link.click()
     URL.revokeObjectURL(url)
   }
+
+  const totals = overview?.totals
+  const formatMetric = (value: number | undefined) =>
+    overview ? (value ?? 0).toLocaleString() : loading ? '…' : '—'
+  const rolePercent = (count: number) =>
+    totals?.users ? Math.round((count / totals.users) * 100) : 0
+  const maxMonthlySignups = Math.max(1, ...(overview?.monthlySignups.map((month) => month.count) ?? []))
+
   return (
     <DashboardFrame
       eyebrow="Admin dashboard"
       title="Academy overview"
-      subtitle="Monitor platform health, growth, and learning outcomes."
-      action="Download report"
+      subtitle="Live account, enrollment, and subject activity from the academy database."
+      action={overview ? 'Download report' : undefined}
       onAction={downloadReport}
     >
+      {error && (
+        <div role="alert" className="mb-5 rounded-xl bg-[#9b7466]/10 p-4 text-sm text-[#8a5548]">
+          Could not load the overview: {error}
+          <button type="button" onClick={() => void loadOverview()} className="ml-3 font-bold underline">
+            Try again
+          </button>
+        </div>
+      )}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          label="Total users"
-          value="8,492"
-          detail="+12.4% from last month"
-          icon="users"
-          accent
-        />
-        <StatCard
-          label="Course enrollments"
-          value="3,840"
-          detail="Across 46 live courses"
-          icon="book"
-        />
-        <StatCard label="Completion rate" value="78.2%" detail="+3.1% this quarter" icon="award" />
-        <StatCard
-          label="Learning hours"
-          value="12.8k"
-          detail="+840 hours this month"
-          icon="clock"
-        />
+        <StatCard label="Total accounts" value={formatMetric(totals?.users)} detail="Registered academy users" icon="users" accent />
+        <StatCard label="Learners" value={formatMetric(totals?.learners)} detail="Learner accounts" icon="users" />
+        <StatCard label="Instructors" value={formatMetric(totals?.instructors)} detail="Instructor accounts" icon="user" />
+        <StatCard label="Enrollments" value={formatMetric(totals?.enrollments)} detail={`${formatMetric(totals?.subjects)} active subjects`} icon="book" />
       </div>
       <div className="mt-6 grid gap-6 xl:grid-cols-[1.5fr_1fr]">
         <div>
-          <SectionTitle title="Platform growth" action="Last 6 months" />
+          <SectionTitle title="New accounts" action="Refresh" onAction={() => void loadOverview()} />
           <div className="card p-5 md:p-6">
             <div className="flex flex-wrap gap-6">
-              <MetricDot color="#5D866C" label="Active users" value="6,281" />
-              <MetricDot color="#C2A68C" label="New enrollments" value="1,240" />
+              <MetricDot color="#5D866C" label="New accounts, last 6 months" value={formatMetric(overview?.monthlySignups.reduce((sum, item) => sum + item.count, 0))} />
+              <MetricDot color="#C2A68C" label="Current enrollments" value={formatMetric(totals?.enrollments)} />
             </div>
-            <div className="relative mt-8 h-52 border-b border-l border-[#31533d]/10">
-              {[25, 50, 75].map((v) => (
-                <div
-                  key={v}
-                  className="absolute inset-x-0 border-t border-dashed border-[#31533d]/8"
-                  style={{ bottom: `${v}%` }}
-                />
-              ))}
-              <div className="absolute inset-0 flex items-end justify-around px-3">
-                {[42, 55, 51, 68, 77, 88].map((h, i) => (
-                  <div key={i} className="flex h-full flex-1 items-end justify-center gap-1">
+            <div className="relative mt-8 flex h-52 items-end gap-3 border-b border-l border-[#31533d]/10 px-4">
+              {overview?.monthlySignups.map((month) => (
+                <div key={month.label} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-2">
+                  <span className="text-[10px] font-bold text-[#789083]">{month.count}</span>
+                  <div className="flex h-[78%] w-full items-end justify-center">
                     <div
-                      className="w-[22%] min-w-3 rounded-t-md bg-[#5D866C]"
-                      style={{ height: `${h}%` }}
-                    />
-                    <div
-                      className="w-[22%] min-w-3 rounded-t-md bg-[#C2A68C]"
-                      style={{ height: `${Math.max(20, h - 17)}%` }}
+                      className="w-8 max-w-full rounded-t-md bg-[#5D866C] transition-all"
+                      title={`${month.count} accounts`}
+                      style={{ height: `${month.count ? Math.max(4, (month.count / maxMonthlySignups) * 100) : 0}%` }}
                     />
                   </div>
-                ))}
-              </div>
-            </div>
-            <div className="mt-2 flex justify-around pl-3 text-[9px] font-bold text-[#8b9890]">
-              {['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN'].map((m) => (
-                <span key={m}>{m}</span>
+                  <span className="text-[9px] font-bold uppercase text-[#8b9890]">{month.label}</span>
+                </div>
               ))}
+              {!overview && !loading && <p className="absolute inset-0 grid place-items-center text-sm text-[#789083]">No account data yet.</p>}
+              {loading && !overview && <p className="absolute inset-0 grid place-items-center text-sm text-[#789083]">Loading account activity…</p>}
             </div>
           </div>
         </div>
@@ -1002,25 +1072,23 @@ function AdminDashboard() {
               <div
                 className="relative h-36 w-36 rounded-full"
                 style={{
-                  background: 'conic-gradient(#5D866C 0 71%, #C2A68C 71% 91%, #E6D8C3 91%)',
+                  background: `conic-gradient(#5D866C 0 ${rolePercent(totals?.learners ?? 0)}%, #C2A68C ${rolePercent(totals?.learners ?? 0)}% ${rolePercent((totals?.learners ?? 0) + (totals?.instructors ?? 0))}%, #E6D8C3 ${rolePercent((totals?.learners ?? 0) + (totals?.instructors ?? 0))}% 100%)`,
                 }}
               >
                 <div className="absolute inset-5 grid place-items-center rounded-full bg-white text-center">
                   <div>
-                    <p className="font-display text-2xl font-bold text-[#284633]">8,492</p>
-                    <p className="text-[9px] font-bold uppercase tracking-wider text-[#789083]">
-                      Users
-                    </p>
+                    <p className="font-display text-2xl font-bold text-[#284633]">{formatMetric(totals?.users)}</p>
+                    <p className="text-[9px] font-bold uppercase tracking-wider text-[#789083]">Users</p>
                   </div>
                 </div>
               </div>
               <div className="space-y-4">
-                <Legend color="#5D866C" label="Learners" value="71%" />
-                <Legend color="#C2A68C" label="Instructors" value="20%" />
-                <Legend color="#E6D8C3" label="Admins" value="9%" />
+                <Legend color="#5D866C" label="Learners" value={`${(totals?.learners ?? 0).toLocaleString()} · ${rolePercent(totals?.learners ?? 0)}%`} />
+                <Legend color="#C2A68C" label="Instructors" value={`${(totals?.instructors ?? 0).toLocaleString()} · ${rolePercent(totals?.instructors ?? 0)}%`} />
+                <Legend color="#E6D8C3" label="Admins" value={`${(totals?.admins ?? 0).toLocaleString()} · ${rolePercent(totals?.admins ?? 0)}%`} />
               </div>
             </div>
-            <button className="mt-7 w-full rounded-xl border border-[#31533d]/12 py-3 text-xs font-bold text-[#5D866C] hover:bg-[#F5F5F0]">
+            <button type="button" onClick={onManageUsers} className="mt-7 w-full rounded-xl border border-[#31533d]/12 py-3 text-xs font-bold text-[#5D866C] hover:bg-[#F5F5F0]">
               Manage users
             </button>
           </div>
@@ -1028,28 +1096,192 @@ function AdminDashboard() {
       </div>
       <div className="mt-6 grid gap-6 xl:grid-cols-[1.5fr_1fr]">
         <div>
-          <SectionTitle title="Top performing courses" action="Full report" />
+          <SectionTitle title="Most enrolled subjects" action="Download report" onAction={downloadReport} />
           <div className="card overflow-hidden">
-            <RankRow rank="01" title="Data Foundations" category="Data literacy" score="94%" />
-            <RankRow
-              rank="02"
-              title="Leadership Essentials"
-              category="Professional skills"
-              score="91%"
-            />
-            <RankRow rank="03" title="Python for Beginners" category="Programming" score="89%" />
+            {overview?.topSubjects.length ? overview.topSubjects.slice(0, 5).map((subject, index) => (
+              <RankRow
+                key={subject.id}
+                rank={String(index + 1).padStart(2, '0')}
+                title={subject.name}
+                category={subject.level}
+                score={`${subject.enrollments.toLocaleString()} enrolled`}
+              />
+            )) : (
+              <p className="p-5 text-sm text-[#789083]">{loading ? 'Loading subjects…' : 'No active subjects yet.'}</p>
+            )}
           </div>
         </div>
         <div>
-          <SectionTitle title="System status" />
-          <div className="card p-5 space-y-4">
-            <Status label="Learning platform" />
-            <Status label="Video services" />
-            <Status label="Assessment engine" />
-            <div className="border-t border-[#31533d]/8 pt-4 text-[11px] text-[#789083]">
-              Last checked just now
-            </div>
+          <SectionTitle title="Recent account activity" action="Manage users" onAction={onManageUsers} />
+          <div className="card divide-y divide-[#31533d]/8">
+            {overview?.recentUsers.length ? overview.recentUsers.map((user) => (
+              <div key={user.id} className="flex items-center justify-between gap-3 px-5 py-4">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold text-[#284633]">{user.name}</p>
+                  <p className="mt-1 text-[10px] capitalize text-[#789083]">{user.role}</p>
+                </div>
+                <time className="shrink-0 text-[10px] text-[#929e97]" dateTime={user.createdAt}>
+                  {new Date(user.createdAt).toLocaleDateString('en-ZW', { day: 'numeric', month: 'short', year: 'numeric' })}
+                </time>
+              </div>
+            )) : (
+              <p className="p-5 text-sm text-[#789083]">{loading ? 'Loading accounts…' : 'No account activity yet.'}</p>
+            )}
           </div>
+        </div>
+      </div>
+    </DashboardFrame>
+  )
+}
+
+function AdminSettingsPage({
+  supabase,
+  organizationName,
+  onOrganizationNameChange,
+  onManageUsers,
+}: {
+  supabase: SupabaseClient
+  organizationName: string
+  onOrganizationNameChange: (name: string) => void
+  onManageUsers: () => void
+}) {
+  const [section, setSection] = useState<'academy' | 'access' | 'communication'>('academy')
+  const [nameDraft, setNameDraft] = useState(organizationName)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+
+  useEffect(() => setNameDraft(organizationName), [organizationName])
+
+  const saveOrganizationName = async (event: FormEvent) => {
+    event.preventDefault()
+    const name = nameDraft.trim()
+    if (!name || name.length > 100) {
+      setError('Use an academy name between 1 and 100 characters.')
+      setMessage('')
+      return
+    }
+    setSaving(true)
+    setError('')
+    setMessage('')
+    const { data: savedSetting, error: saveError } = await supabase
+      .from('academy_settings')
+      .update({ organization_name: name })
+      .eq('id', 'academy')
+      .select('id')
+      .maybeSingle()
+    setSaving(false)
+    if (saveError || !savedSetting) {
+      setError(saveError?.message ?? 'Only an administrator can change the academy name.')
+      return
+    }
+    onOrganizationNameChange(name)
+    setMessage('Academy name updated.')
+  }
+
+  return (
+    <DashboardFrame
+      eyebrow="Admin dashboard"
+      title="Settings"
+      subtitle="Manage the academy identity and review account access."
+    >
+      <div className="grid gap-6 lg:grid-cols-[230px_minmax(0,1fr)]">
+        <nav aria-label="Settings sections" className="card h-fit overflow-hidden p-2">
+          {([
+            ['academy', 'Academy'],
+            ['access', 'Access & privacy'],
+            ['communication', 'Email'],
+          ] as const).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={section === key}
+              onClick={() => setSection(key)}
+              className={`flex w-full items-center justify-between rounded-xl px-4 py-3 text-left text-sm font-semibold transition ${section === key ? 'bg-[#E6D8C3]/45 text-[#31533d]' : 'text-[#789083] hover:bg-[#F5F5F0]'}`}
+            >
+              {label}
+              <Icon name="chevron" size={16} />
+            </button>
+          ))}
+        </nav>
+
+        <div className="space-y-5">
+          {section === 'academy' ? (
+            <section role="tabpanel" className="card overflow-hidden">
+              <div className="border-b border-[#31533d]/10 px-6 py-5">
+                <h2 className="font-display text-lg font-bold text-[#284633]">Academy identity</h2>
+                <p className="mt-1 text-sm text-[#789083]">This name appears in the academy navigation and sign-in screen.</p>
+              </div>
+              <form onSubmit={saveOrganizationName} className="flex flex-wrap items-end gap-3 p-6">
+                <div className="min-w-[220px] flex-1">
+                  <Field label="Organization name">
+                    <input
+                      className="form-input"
+                      value={nameDraft}
+                      onChange={(event) => setNameDraft(event.target.value)}
+                      maxLength={100}
+                      required
+                    />
+                  </Field>
+                </div>
+                <button type="submit" disabled={saving} className="primary-button disabled:opacity-60">
+                  {saving ? 'Saving…' : 'Save name'}
+                </button>
+              </form>
+              {error && <p role="alert" className="mx-6 mb-5 rounded-lg bg-[#9b7466]/10 p-3 text-sm text-[#8a5548]">{error}</p>}
+              {message && <p role="status" className="mx-6 mb-5 rounded-lg bg-[#5D866C]/10 p-3 text-sm text-[#31533d]">{message}</p>}
+            </section>
+          ) : section === 'access' ? (
+            <section role="tabpanel" className="space-y-5">
+              <div className="card overflow-hidden">
+                <div className="border-b border-[#31533d]/10 px-6 py-5">
+                  <h2 className="font-display text-lg font-bold text-[#284633]">Accounts & roles</h2>
+                  <p className="mt-1 text-sm text-[#789083]">Administrators control roles and academy accounts.</p>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-4 p-6">
+                  <div>
+                    <p className="text-sm font-semibold text-[#31533d]">User management</p>
+                    <p className="mt-1 max-w-xl text-xs leading-5 text-[#789083]">Create learner, instructor, or administrator accounts and remove accounts that are no longer needed.</p>
+                  </div>
+                  <button type="button" onClick={onManageUsers} className="secondary-button">Manage users</button>
+                </div>
+              </div>
+              <div className="card overflow-hidden">
+                <div className="border-b border-[#31533d]/10 px-6 py-5">
+                  <h2 className="font-display text-lg font-bold text-[#284633]">Privacy & data</h2>
+                  <p className="mt-1 text-sm text-[#789083]">Access follows the signed-in account’s academy role.</p>
+                </div>
+                <ul className="divide-y divide-[#31533d]/8 px-6">
+                  <li className="flex items-start gap-3 py-4">
+                    <Icon name="check" size={18} className="mt-0.5 text-[#5D866C]" />
+                    <div><p className="text-sm font-semibold text-[#31533d]">Student records stay restricted</p><p className="mt-1 text-xs leading-5 text-[#789083]">Student details and submissions are limited by database access policies.</p></div>
+                  </li>
+                  <li className="flex items-start gap-3 py-4">
+                    <Icon name="check" size={18} className="mt-0.5 text-[#5D866C]" />
+                    <div><p className="text-sm font-semibold text-[#31533d]">Account roles are administrator-managed</p><p className="mt-1 text-xs leading-5 text-[#789083]">Users cannot promote their own account through profile settings.</p></div>
+                  </li>
+                </ul>
+              </div>
+            </section>
+          ) : (
+            <section role="tabpanel" className="card overflow-hidden">
+              <div className="border-b border-[#31533d]/10 px-6 py-5">
+                <h2 className="font-display text-lg font-bold text-[#284633]">Account emails</h2>
+                <p className="mt-1 text-sm text-[#789083]">Welcome messages for accounts created by an administrator.</p>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-4 p-6">
+                <div className="flex items-start gap-3">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#E6D8C3]/55 text-[#5D866C]"><Icon name="mail" /></span>
+                  <div>
+                    <p className="text-sm font-semibold text-[#31533d]">Branded sign-in email</p>
+                    <p className="mt-1 max-w-xl text-xs leading-5 text-[#789083]">When server email delivery is configured, new accounts receive their email address, temporary password, and first sign-in instructions in an academy-colour welcome email. Delivery credentials are managed in the app host&apos;s server-side environment settings.</p>
+                  </div>
+                </div>
+                <button type="button" onClick={onManageUsers} className="secondary-button">Create an account</button>
+              </div>
+            </section>
+          )}
         </div>
       </div>
     </DashboardFrame>
@@ -1067,9 +1299,10 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<'learner' | 'instructor' | 'admin'>('learner')
+  const [userTab, setUserTab] = useState<'all' | ManagedUser['role']>('all')
+  const [userSearch, setUserSearch] = useState('')
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
-  const [generatedPassword, setGeneratedPassword] = useState('')
   const [saving, setSaving] = useState(false)
 
   const loadUsers = useCallback(async (page = 1, append = false) => {
@@ -1125,7 +1358,6 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
     event.preventDefault()
     setError('')
     setMessage('')
-    setGeneratedPassword('')
 
     const { data: { session }, error: sessionError } = await supabase.auth.getSession()
     if (sessionError) {
@@ -1163,11 +1395,10 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
         typeof result === 'object' && result !== null
           ? (result as Record<string, unknown>)
           : {}
-      if (typeof responseBody.temporaryPassword !== 'string') {
-        throw new Error('The account was created, but its temporary password was not returned.')
+      if (responseBody.emailSent !== true) {
+        throw new Error('The account was created, but its welcome email was not confirmed.')
       }
-      setGeneratedPassword(responseBody.temporaryPassword)
-      setMessage(`Account created for ${email.trim()}. Share this temporary password securely.`)
+      setMessage(`Account created for ${email.trim()}. A branded sign-in email with a temporary password was sent.`)
       setFullName('')
       setEmail('')
       setRole('learner')
@@ -1225,6 +1456,31 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
     }
   }
 
+  const visibleUsers = users.filter((user) => {
+    const matchesRole = userTab === 'all' || user.role === userTab
+    const query = userSearch.trim().toLowerCase()
+    const matchesSearch = `${user.name} ${user.email} ${user.role}`.toLowerCase().includes(query)
+    return matchesRole && matchesSearch
+  })
+
+  const exportUsers = () => {
+    const csvCell = (value: string) => `"${value.replaceAll('"', '""')}"`
+    const rows = [
+      ['Name', 'Email', 'Role'],
+      ...visibleUsers.map((user) => [user.name, user.email, user.role]),
+    ]
+    const blobUrl = URL.createObjectURL(
+      new Blob([rows.map((row) => row.map(csvCell).join(',')).join('\r\n')], {
+        type: 'text/csv;charset=utf-8',
+      }),
+    )
+    const link = document.createElement('a')
+    link.href = blobUrl
+    link.download = 'dzikaz-academy-users.csv'
+    link.click()
+    URL.revokeObjectURL(blobUrl)
+  }
+
   return (
     <DashboardFrame
       eyebrow="Admin dashboard"
@@ -1277,14 +1533,6 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
         {message && (
           <div role="status" className="rounded-lg bg-[#5D866C]/10 p-3 text-xs text-[#31533d]">
             <p>{message}</p>
-            {generatedPassword && (
-              <>
-                <p className="mt-2 break-all rounded bg-white/70 p-2 font-mono select-all">
-                  {generatedPassword}
-                </p>
-                <p className="mt-2">The user must change it after signing in.</p>
-              </>
-            )}
           </div>
         )}
         <button disabled={saving} className="primary-button disabled:opacity-60">
@@ -1308,6 +1556,40 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
             Refresh
           </button>
         </div>
+        <div className="border-b border-[#31533d]/10 px-5 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div role="tablist" aria-label="Filter academy accounts" className="flex flex-wrap gap-1 rounded-xl bg-[#F5F5F0] p-1">
+              {([
+                ['all', 'All'],
+                ['learner', 'Learners'],
+                ['instructor', 'Instructors'],
+                ['admin', 'Admins'],
+              ] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  role="tab"
+                  aria-selected={userTab === key}
+                  onClick={() => setUserTab(key)}
+                  className={`rounded-lg px-3 py-2 text-xs font-bold transition ${userTab === key ? 'bg-[#31533d] text-white' : 'text-[#789083] hover:text-[#31533d]'}`}
+                >
+                  {label} <span className="ml-1 opacity-70">{users.filter((user) => key === 'all' || user.role === key).length}</span>
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="relative">
+                <span className="sr-only">Search academy accounts</span>
+                <Icon name="search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#789083]" />
+                <input className="form-input min-w-52 pl-9" value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Search users" />
+              </label>
+              <button type="button" onClick={exportUsers} disabled={!visibleUsers.length} className="secondary-button disabled:opacity-50">
+                <Icon name="file" size={15} /> Export CSV
+              </button>
+            </div>
+          </div>
+          <p className="mt-3 text-[10px] text-[#929e97]">Showing {visibleUsers.length} of {users.length} loaded accounts{nextPage ? '. Load more to include additional accounts.' : '.'}</p>
+        </div>
         {usersError && (
           <p role="alert" className="m-4 rounded-lg bg-[#9b7466]/10 p-3 text-xs text-[#8a5548]">
             {usersError}
@@ -1315,11 +1597,11 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
         )}
         {loadingUsers ? (
           <p className="p-5 text-sm text-[#789083]">Loading academy accounts…</p>
-        ) : users.length === 0 ? (
+        ) : visibleUsers.length === 0 ? (
           <p className="p-5 text-sm text-[#789083]">No accounts found.</p>
         ) : (
           <ul className="divide-y divide-[#31533d]/8">
-            {users.map((user) => (
+            {visibleUsers.map((user) => (
               <li
                 key={user.id}
                 className="flex flex-wrap items-center justify-between gap-4 px-5 py-4"
@@ -3410,9 +3692,11 @@ const loginRoles: { value: LoginRole; label: string }[] = [
 
 function LoginPage({
   supabase,
+  academyName,
   onRoleChange,
 }: {
   supabase: SupabaseClient | null
+  academyName: string
   onRoleChange: (role: LoginRole) => void
 }) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
@@ -3487,21 +3771,21 @@ function LoginPage({
       <section className="relative hidden min-h-screen overflow-hidden bg-[#31533d] p-12 text-white lg:flex lg:flex-col lg:justify-between">
         <div className="absolute -right-36 -top-28 h-[30rem] w-[30rem] rounded-full border border-white/10" />
         <div className="absolute -bottom-48 -left-36 h-[34rem] w-[34rem] rounded-full border border-white/10" />
-        <div className="relative"><Logo /></div>
+        <div className="relative"><Logo academyName={academyName} /></div>
         <div className="relative max-w-xl">
           <p className="text-xs font-bold uppercase tracking-[.25em] text-[#E6D8C3]">Learn. Grow. Achieve.</p>
           <h1 className="font-display mt-5 text-5xl font-extrabold leading-tight">Reaching learning heights.</h1>
           <p className="mt-5 max-w-md text-base leading-7 text-white/70">
-            One connected space for learners, instructors, and the St Dzikaz Academy community.
+            One connected space for learners, instructors, and the {academyName} community.
           </p>
         </div>
-        <p className="relative text-xs text-white/45">© St Dzikaz Academy</p>
+        <p className="relative text-xs text-white/45">© {academyName}</p>
       </section>
       <section className="flex min-h-screen items-center justify-center px-6 py-12 sm:px-10">
         <div className="w-full max-w-md">
           <div className="flex items-center gap-3 lg:hidden">
             <LogoMark />
-            <span className="font-display text-lg font-bold">St Dzikaz Academy</span>
+            <span className="font-display text-lg font-bold">{academyName}</span>
           </div>
           <div className="mt-8 lg:mt-0">
             {mode === 'signin' && (
@@ -3633,7 +3917,7 @@ function LoginPage({
           </form>
           {loginRole === 'learner' && (
             <p className="mt-6 text-center text-sm text-[#789083]">
-              {mode === 'signin' ? 'New to St Dzikaz Academy?' : 'Already have an account?'}{' '}
+              {mode === 'signin' ? `New to ${academyName}?` : 'Already have an account?'}{' '}
               <button
                 type="button"
                 onClick={() => {
@@ -3665,9 +3949,11 @@ function LoginPage({
 
 function PasswordChangePage({
   supabase,
+  academyName,
   onComplete,
 }: {
   supabase: SupabaseClient
+  academyName: string
   onComplete: () => void
 }) {
   const [password, setPassword] = useState('')
@@ -3699,7 +3985,7 @@ function PasswordChangePage({
         <div className="flex justify-center"><LogoMark /></div>
         <h1 className="font-display mt-6 text-center text-2xl font-bold">Set a new password</h1>
         <p className="mt-2 text-center text-sm leading-6 text-[#789083]">
-          For your security, choose a new password before continuing to St Dzikaz Academy.
+          For your security, choose a new password before continuing to {academyName}.
         </p>
         <div className="mt-6 space-y-4">
           <Field label="New password">
@@ -3727,7 +4013,7 @@ function LogoImage({ className }: { className: string }) {
     <span className={`relative block shrink-0 overflow-hidden bg-[#f8f8f5] ${className}`}>
       <Image
         src={academyLogo}
-        alt="St Dzikaz Academy"
+        alt="Academy logo"
         fill
         sizes="64px"
         className="object-contain"
@@ -3745,23 +4031,47 @@ function ProfileModal({
   profile,
   onClose,
   onSave,
+  onChangePassword,
   onSwitch,
 }: {
   open: boolean
   profile: Profile
   onClose: () => void
   onSave: (profile: Profile) => Promise<string | undefined>
+  onChangePassword: (password: string) => Promise<string | undefined>
   onSwitch: () => void
 }) {
   const [draft, setDraft] = useState(profile)
   const [error, setError] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [passwordConfirmation, setPasswordConfirmation] = useState('')
+  const [settingsTab, setSettingsTab] = useState<'general' | 'profile' | 'security'>('general')
   useEffect(() => setDraft(profile), [profile, open])
+  useEffect(() => {
+    if (open) {
+      setNewPassword('')
+      setPasswordConfirmation('')
+      setError('')
+      setSettingsTab('general')
+    }
+  }, [open])
   if (!open) return null
   const upload = (file?: File) => {
     if (!file) return
-    if (file.size > 2_000_000) return
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setError('Choose a JPG, PNG, or WebP profile image.')
+      return
+    }
+    if (file.size > 2_000_000) {
+      setError('Choose a profile image smaller than 2 MB.')
+      return
+    }
     const reader = new FileReader()
-    reader.onload = () => setDraft({ ...draft, image: String(reader.result) })
+    reader.onload = () => {
+      setDraft((current) => ({ ...current, image: String(reader.result), avatarFile: file }))
+      setError('')
+    }
+    reader.onerror = () => setError('Could not read the selected profile image.')
     reader.readAsDataURL(file)
   }
   return (
@@ -3770,11 +4080,23 @@ function ProfileModal({
         onSubmit={async (e) => {
           e.preventDefault()
           setError('')
+          if ((newPassword || passwordConfirmation) && newPassword.length < 8) {
+            setError('Use a new password with at least 8 characters.')
+            return
+          }
+          if (newPassword !== passwordConfirmation) {
+            setError('The new passwords do not match.')
+            return
+          }
           const saveError = await onSave(draft)
           if (saveError) setError(saveError)
-          else onClose()
+          else if (newPassword) {
+            const passwordError = await onChangePassword(newPassword)
+            if (passwordError) setError(`Profile saved, but the password could not be changed: ${passwordError}`)
+            else onClose()
+          } else onClose()
         }}
-        className="modal-card max-w-xl"
+        className="modal-card max-w-4xl"
       >
         <div className="flex items-center justify-between">
           <div>
@@ -3787,50 +4109,43 @@ function ProfileModal({
             <Icon name="x" />
           </button>
         </div>
-        <div className="mt-6 flex items-center gap-4">
-          <Avatar initials={initials(draft.name)} image={draft.image} />
-          <label className="secondary-button">
-            <Icon name="camera" size={15} /> Upload photo
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(e) => upload(e.target.files?.[0])}
-              className="hidden"
-            />
-          </label>
-          <span className="text-[10px] text-[#929d96]">JPG or PNG, up to 2MB</span>
-        </div>
-        <div className="mt-6 grid gap-4 sm:grid-cols-2">
-          <Field label="Full name">
-            <input
-              className="form-input"
-              value={draft.name}
-              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-              required
-            />
-          </Field>
-          <Field label="Sign-in identifier">
-            <input
-              className="form-input"
-              type="text"
-              value={draft.email}
-              readOnly
-            />
-          </Field>
-          <Field label="School / organisation">
-            <input
-              className="form-input"
-              value={draft.school}
-              onChange={(e) => setDraft({ ...draft, school: e.target.value })}
-            />
-          </Field>
-          <Field label="Phone number">
-            <input
-              className="form-input"
-              value={draft.phone}
-              onChange={(e) => setDraft({ ...draft, phone: e.target.value })}
-            />
-          </Field>
+        <div className="mt-6 grid gap-5 md:grid-cols-[190px_minmax(0,1fr)]">
+          <nav role="tablist" aria-label="Account settings" className="flex h-fit flex-col overflow-hidden rounded-xl border border-[#31533d]/10 bg-white p-2">
+            {([
+              ['general', 'General'],
+              ['profile', 'Profile'],
+              ['security', 'Password'],
+            ] as const).map(([key, label]) => (
+              <button key={key} type="button" role="tab" aria-selected={settingsTab === key} onClick={() => setSettingsTab(key)} className={`flex items-center justify-between rounded-lg px-3 py-3 text-left text-sm font-semibold ${settingsTab === key ? 'bg-[#E6D8C3]/45 text-[#31533d]' : 'text-[#789083] hover:bg-[#F5F5F0]'}`}>
+                {label}<Icon name="chevron" size={15} />
+              </button>
+            ))}
+          </nav>
+          <div id="account-settings-panel" role="tabpanel" className="min-h-64 rounded-xl bg-white p-4 md:p-5">
+            {settingsTab === 'general' && <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Full name"><input className="form-input" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} required maxLength={120} /></Field>
+              <Field label="Username"><input className="form-input" value={draft.username} onChange={(e) => setDraft({ ...draft, username: e.target.value })} autoComplete="username" minLength={3} maxLength={30} pattern="[A-Za-z0-9_]{3,30}" title="Use 3 to 30 letters, numbers, or underscores." required /></Field>
+              <Field label="Sign-in email"><input className="form-input" type="text" value={draft.email} readOnly /><p className="mt-1 text-[10px] text-[#929d96]">Contact an administrator to change your email address.</p></Field>
+              <Field label="School / organisation"><input className="form-input" value={draft.school} onChange={(e) => setDraft({ ...draft, school: e.target.value })} maxLength={120} /></Field>
+              <Field label="Phone number"><input className="form-input" type="tel" value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} maxLength={40} /></Field>
+            </div>}
+            {settingsTab === 'profile' && <div>
+              <div className="flex flex-wrap items-center gap-4">
+                <Avatar initials={initials(draft.name)} image={draft.image} />
+                <label className="secondary-button"><Icon name="camera" size={15} /> Upload photo<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => upload(e.target.files?.[0])} className="hidden" /></label>
+                <span className="text-[10px] text-[#929d96]">JPG, PNG, or WebP, up to 2 MB</span>
+              </div>
+              <Field label="Bio"><textarea className="form-input mt-5 min-h-32 resize-y" value={draft.bio} onChange={(e) => setDraft({ ...draft, bio: e.target.value })} maxLength={300} placeholder="A little about you" /><p className="mt-1 text-right text-[10px] text-[#929d96]">{draft.bio.length}/300</p></Field>
+            </div>}
+            {settingsTab === 'security' && <div className="max-w-lg">
+              <h3 className="font-display text-lg font-bold text-[#284633]">Change password</h3>
+              <p className="mt-1 text-sm text-[#789083]">Leave both fields blank to keep your current password.</p>
+              <div className="mt-5 space-y-4">
+                <Field label="New password"><input className="form-input" type="password" autoComplete="new-password" minLength={8} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} /></Field>
+                <Field label="Confirm new password"><input className="form-input" type="password" autoComplete="new-password" minLength={8} value={passwordConfirmation} onChange={(e) => setPasswordConfirmation(e.target.value)} /></Field>
+              </div>
+            </div>}
+          </div>
         </div>
         {error && <p role="alert" className="mt-4 rounded-lg bg-[#9b7466]/10 p-3 text-xs text-[#8a5548]">{error}</p>}
         <div className="mt-6 flex flex-wrap justify-between gap-2">
@@ -3841,7 +4156,7 @@ function ProfileModal({
             <button type="button" onClick={onClose} className="secondary-button">
               Cancel
             </button>
-            <button className="primary-button">Save profile</button>
+            <button className="primary-button">Save changes</button>
           </div>
         </div>
       </form>
@@ -3851,6 +4166,7 @@ function ProfileModal({
 
 export default function App() {
   const [supabase] = useState(getSupabaseBrowserClient)
+  const [organizationName, setOrganizationName] = useState('St Dzikaz Academy')
   const [authUser, setAuthUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [profileReady, setProfileReady] = useState(false)
@@ -3864,6 +4180,23 @@ export default function App() {
   const [notices, setNotices] = useState<Notice[]>(initialNotices)
   const [subjects, setSubjects] = useState<Subject[]>(initialSubjects)
   const [hydrated, setHydrated] = useState(false)
+
+  useEffect(() => {
+    if (!supabase) return
+    let active = true
+    const loadAcademyName = async () => {
+      const { data } = await supabase
+        .from('academy_settings')
+        .select('organization_name')
+        .eq('id', 'academy')
+        .maybeSingle()
+      if (active && data?.organization_name) setOrganizationName(data.organization_name)
+    }
+    void loadAcademyName()
+    return () => {
+      active = false
+    }
+  }, [supabase])
 
   useEffect(() => {
     if (!supabase) {
@@ -3905,7 +4238,7 @@ export default function App() {
     const loadProfile = async () => {
       const { data, error } = await supabase
         .from('profiles')
-        .select('username, full_name, role, school, phone, requires_password_change')
+        .select('username, full_name, bio, avatar_url, role, school, phone, requires_password_change')
         .eq('id', authUser.id)
         .single()
 
@@ -3973,6 +4306,10 @@ export default function App() {
         [nextRole]: {
           ...current[nextRole],
           name: data.full_name || data.username,
+          username: data.username,
+          bio: data.bio ?? '',
+          image: data.avatar_url || undefined,
+          avatarFile: undefined,
           email: authUser.email?.endsWith('@login.dzikaz.ac.zw')
             ? 'Registration number and password'
             : authUser.email ?? '',
@@ -4021,7 +4358,7 @@ export default function App() {
   if (authLoading || (authUser && !profileReady)) {
     return (
       <main className="grid min-h-screen place-items-center bg-[#F5F5F0]">
-        <p className="text-sm font-semibold text-[#5D866C]">Connecting to St Dzikaz Academy…</p>
+        <p className="text-sm font-semibold text-[#5D866C]">Connecting to {organizationName}…</p>
       </main>
     )
   }
@@ -4036,6 +4373,7 @@ export default function App() {
         )}
         <LoginPage
           supabase={supabase}
+          academyName={organizationName}
           onRoleChange={(nextRole) => {
             expectedLoginRole.current = nextRole
             setAuthError('')
@@ -4046,12 +4384,21 @@ export default function App() {
   }
 
   if (requiresPasswordChange) {
-    return <PasswordChangePage supabase={supabase} onComplete={() => setRequiresPasswordChange(false)} />
+    return <PasswordChangePage supabase={supabase} academyName={organizationName} onComplete={() => setRequiresPasswordChange(false)} />
   }
 
   const renderContent = () => {
     if (role === 'Admin' && active === 'User management')
       return <AdminUsersPage supabase={supabase} />
+    if (role === 'Admin' && active === 'Settings')
+      return (
+        <AdminSettingsPage
+          supabase={supabase}
+          organizationName={organizationName}
+          onManageUsers={() => setActive('User management')}
+          onOrganizationNameChange={setOrganizationName}
+        />
+      )
     if (
       (role === 'Learner' && (active === 'My learning' || active === 'Classrooms')) ||
       (role === 'Instructor' && active === 'Classrooms')
@@ -4078,7 +4425,7 @@ export default function App() {
     ) : role === 'Instructor' ? (
       <InstructorDashboard />
     ) : (
-      <AdminDashboard />
+      <AdminDashboard supabase={supabase} onManageUsers={() => setActive('User management')} />
     )
   }
   return (
@@ -4088,6 +4435,7 @@ export default function App() {
         active={active}
         setActive={setActive}
         profile={profiles[role]}
+        academyName={organizationName}
         onProfile={() => setProfileOpen(true)}
         onLogout={() => void logout()}
       />
@@ -4095,6 +4443,7 @@ export default function App() {
         <Header
           role={role}
           profile={profiles[role]}
+          academyName={organizationName}
           onProfile={() => setProfileOpen(true)}
           onNavigate={setActive}
         />
@@ -4117,10 +4466,26 @@ export default function App() {
         profile={profiles[role]}
         onClose={() => setProfileOpen(false)}
         onSave={async (profile) => {
+          let avatarUrl = profile.image ?? ''
+          if (profile.avatarFile) {
+            const avatarPath = `${authUser.id}/avatar`
+            const { error: avatarError } = await supabase.storage
+              .from('profile-avatars')
+              .upload(avatarPath, profile.avatarFile, {
+                upsert: true,
+                contentType: profile.avatarFile.type,
+                cacheControl: '3600',
+              })
+            if (avatarError) return avatarError.message
+            avatarUrl = `${supabase.storage.from('profile-avatars').getPublicUrl(avatarPath).data.publicUrl}?v=${Date.now()}`
+          }
           const { error: profileError } = await supabase
             .from('profiles')
             .update({
               full_name: profile.name.trim(),
+              username: profile.username.trim(),
+              bio: profile.bio.trim(),
+              avatar_url: avatarUrl,
               school: profile.school.trim(),
               ...(role === 'Learner' ? {} : { phone: profile.phone.trim() }),
             })
@@ -4133,8 +4498,15 @@ export default function App() {
               .eq('profile_id', authUser.id)
             if (detailsError) return detailsError.message
           }
-          setProfiles((current) => ({ ...current, [role]: profile }))
+          setProfiles((current) => ({
+            ...current,
+            [role]: { ...profile, image: avatarUrl, avatarFile: undefined },
+          }))
           return undefined
+        }}
+        onChangePassword={async (password) => {
+          const { error: passwordError } = await supabase.auth.updateUser({ password })
+          return passwordError?.message
         }}
         onSwitch={() => {
           setProfileOpen(false)

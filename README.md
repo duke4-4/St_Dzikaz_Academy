@@ -17,7 +17,8 @@ The browser only uses the Supabase URL and publishable anon key. Never expose a 
 
 | Table | Purpose |
 | --- | --- |
-| `profiles` | Supabase Auth user profile, unique username, academy role, and first-login password change flag. Supabase Auth handles passwords; they are never stored in this table. |
+| `profiles` | Supabase Auth user profile, editable unique username, bio, avatar URL, academy role, and first-login password change flag. Supabase Auth handles passwords; they are never stored in this table. |
+| `profile-avatars` Storage bucket | Public profile photos. Each signed-in user can upload or replace only their own avatar. |
 | `student_details` | Private registration number, class, date of birth, contact number, academic year, and gender imported from the workbook. Visible only to the student and administrators. |
 | `subjects` | ZIMSEC subjects, level, syllabus code, and instructor. |
 | `enrollments` | Learners enrolled in subjects. |
@@ -25,6 +26,7 @@ The browser only uses the Supabase URL and publishable anon key. Never expose a 
 | `notices` | Announcements and audience. |
 | `marks` | Student assessment scores, maximum score, date, feedback, subject, and recording instructor. |
 | `learning_progress` | Per-learner completed lesson count for the featured course, protected by row-level security. |
+| `academy_settings` | Public academy display name, editable by administrators. |
 | `conversations` | Private learner/instructor conversation scoped to an enrolled subject. |
 | `messages` | Messages and read status within a conversation. |
 
@@ -40,6 +42,10 @@ Gmail addresses are supported for email/password sign-in and signup. In Supabase
 The classroom workflow is in `supabase/migrations/202611180001_classroom_workflows.sql`. Apply it with `supabase db push` before using classroom pages. It adds subject archiving, student enrollment by registration number, classroom documents, assignments and submissions, attendance, and the private `classroom-files` Storage bucket. Classroom and submitted files are limited to PDF/DOC/DOCX and 10 MB. Archived subjects keep their records and are read-only.
 
 Lesson progress is stored in `supabase/migrations/202611200001_learning_progress.sql`. Apply it with `supabase db push` so the learner dashboard can save and restore each student's completed lesson count.
+
+Profile bios and public profile photos are added by `supabase/migrations/202611200002_profile_bio_and_avatars.sql`. Apply it with `supabase db push` before using the expanded profile editor.
+
+The academy display-name setting is added by `supabase/migrations/202611200003_academy_settings.sql`. Apply it with `supabase db push` before editing the academy name in Admin Settings.
 
 ## Import student accounts
 
@@ -81,5 +87,7 @@ Use the `admin` role only for trusted academy administrators. The app does not l
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `NEXT_PUBLIC_SITE_URL` (the production app URL, recommended for canonical metadata)
 - `SUPABASE_SERVICE_ROLE_KEY` (server-only; required for admins to create accounts from User management)
+- `RESEND_API_KEY` (server-only; sends temporary-password emails)
+- `RESEND_FROM_EMAIL` (verified sender address configured in Resend)
 
-Apply the Supabase migration before using the deployed app. Never add the service-role key or the private student workbook to Vercel. The workbook and generated credential report are excluded from deployment.
+Apply Supabase migrations before using the deployed app. Never add secret keys under a `NEXT_PUBLIC_*` name or commit them. The private student workbook and generated credential report are excluded from deployment.

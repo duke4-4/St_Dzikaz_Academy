@@ -13,6 +13,93 @@ function jsonError(error: string, status: number) {
   return NextResponse.json({ error }, { status })
 }
 
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (character) => {
+    const entities: Record<string, string> = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    }
+    return entities[character]
+  })
+}
+
+async function sendWelcomeEmail({
+  apiKey,
+  from,
+  to,
+  name,
+  academyName,
+  role,
+  temporaryPassword,
+}: {
+  apiKey: string
+  from: string
+  to: string
+  name: string
+  academyName: string
+  role: AcademyRole
+  temporaryPassword: string
+}) {
+  const safeName = escapeHtml(name)
+  const safePassword = escapeHtml(temporaryPassword)
+  const safeAcademyName = escapeHtml(academyName)
+  const roleLabel = role === 'learner' ? 'learner' : role === 'instructor' ? 'instructor' : 'administrator'
+  let loginUrl = ''
+  try {
+    const configuredSiteUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.FIGMA_PUBLIC_URL
+    if (configuredSiteUrl) {
+      const parsedSiteUrl = new URL(configuredSiteUrl)
+      if (parsedSiteUrl.protocol === 'https:' || parsedSiteUrl.protocol === 'http:') {
+        loginUrl = parsedSiteUrl.toString()
+      }
+    }
+  } catch {
+    loginUrl = ''
+  }
+  const loginLink = loginUrl
+    ? `<p style="margin:0 0 18px"><a href="${escapeHtml(loginUrl)}" style="display:inline-block;border-radius:10px;background:#5d866c;padding:12px 18px;color:#ffffff;font-weight:bold;text-decoration:none">Sign in to ${safeAcademyName}</a></p>`
+    : ''
+  const loginText = loginUrl ? ` Sign in here: ${loginUrl}` : ''
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from,
+      to: [to],
+      subject: `Your ${academyName} account is ready`,
+      html: `
+        <div style="margin:0;background:#f5f5f0;padding:32px 16px;font-family:Arial,sans-serif;color:#284633">
+          <div style="max-width:560px;margin:0 auto;overflow:hidden;border-radius:18px;background:#ffffff">
+            <div style="background:#31533d;padding:28px 32px;color:#ffffff">
+              <p style="margin:0 0 8px;color:#e6d8c3;font-size:11px;font-weight:bold;letter-spacing:2px;text-transform:uppercase">${safeAcademyName}</p>
+              <h1 style="margin:0;font-size:25px;line-height:1.25">Welcome to your academy account</h1>
+            </div>
+            <div style="padding:30px 32px">
+              <p style="margin:0 0 16px;font-size:16px">Hello ${safeName},</p>
+              <p style="margin:0 0 22px;color:#52665a;line-height:1.6">An administrator created your ${roleLabel} account. Sign in with this email address and temporary password:</p>
+              ${loginLink}
+              <div style="margin:0 0 22px;border-radius:12px;background:#f5f5f0;padding:18px 20px">
+                <p style="margin:0 0 10px;color:#789083;font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:1px">Temporary password</p>
+                <p style="margin:0;overflow-wrap:anywhere;color:#31533d;font-family:monospace;font-size:16px;font-weight:bold">${safePassword}</p>
+              </div>
+              <p style="margin:0;color:#52665a;line-height:1.6">You will be asked to choose a new password the first time you sign in. Keep this message private and delete it after changing your password.</p>
+            </div>
+            <div style="border-top:1px solid #e8ece8;padding:18px 32px;color:#789083;font-size:11px">Reaching learning heights</div>
+          </div>
+        </div>`,
+      text: `Welcome to ${academyName}, ${name}. An administrator created your ${roleLabel} account. Sign in with ${to} and this temporary password: ${temporaryPassword}.${loginText} You will be asked to choose a new password after your first sign-in. Keep this message private and delete it after changing your password.`,
+    }),
+    signal: AbortSignal.timeout(12_000),
+  })
+  return response.ok
+}
+
 async function authorizeAdmin(request: Request) {
   const accessToken = request.headers.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1]
   if (!accessToken) {
@@ -107,6 +194,15 @@ export async function POST(request: Request) {
   const authorization = await authorizeAdmin(request)
   if ('response' in authorization) return authorization.response
 
+  const resendApiKey = process.env.RESEND_API_KEY
+  const resendFromEmail = process.env.RESEND_FROM_EMAIL
+  if (!resendApiKey || !resendFromEmail) {
+    return jsonError(
+      'Account emails are not configured. Add the server-only RESEND_API_KEY and RESEND_FROM_EMAIL settings before creating accounts.',
+      503,
+    )
+  }
+
   let body: unknown
   try {
     body = await request.json()
@@ -140,8 +236,39 @@ export async function POST(request: Request) {
   })
   if (error) return jsonError(error.message, 400)
 
+  const { data: academySettings } = await authorization.context.adminClient
+    .from('academy_settings')
+    .select('organization_name')
+    .eq('id', 'academy')
+    .maybeSingle()
+  const academyName = academySettings?.organization_name || 'St Dzikaz Academy'
+
+  let emailSent = false
+  try {
+    emailSent = await sendWelcomeEmail({
+      apiKey: resendApiKey,
+      from: resendFromEmail,
+      to: email,
+      name: fullName,
+      academyName,
+      role,
+      temporaryPassword,
+    })
+  } catch {
+    emailSent = false
+  }
+  if (!emailSent) {
+    const { error: rollbackError } = await authorization.context.adminClient.auth.admin.deleteUser(data.user.id)
+    return jsonError(
+      rollbackError
+        ? 'The welcome email failed and the new account could not be removed. Remove the account from User management and check the email configuration.'
+        : 'The account was not created because the welcome email could not be sent. Check the email provider settings and try again.',
+      502,
+    )
+  }
+
   return NextResponse.json(
-    { id: data.user.id, email: data.user.email, role, temporaryPassword },
+    { id: data.user.id, email: data.user.email, role, emailSent },
     { status: 201 },
   )
 }
