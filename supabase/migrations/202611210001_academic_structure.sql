@@ -151,7 +151,7 @@ begin
       from public.classroom_assignments a where a.id = new.assignment_id and a.assessment_type = 'quiz')
   then raise exception 'Quiz answer key is incomplete.'; end if;
   if jsonb_array_length(new.answers) <> question_count
-    or exists (select 1 from jsonb_array_elements_text(new.answers) answer
+    or exists (select 1 from jsonb_array_elements_text(new.answers) as answers(answer)
       where answer !~ '^[0-3]$')
   then raise exception 'Select one valid answer for every quiz question.'; end if;
   select coalesce(max(a.max_score), 100) into maximum_score
@@ -186,11 +186,13 @@ create policy "Teachers manage assigned quiz answer keys" on public.classroom_qu
 
 drop policy if exists "Learners and assigned teachers read quiz attempts" on public.classroom_quiz_attempts;
 drop policy if exists "Learners submit quiz attempts" on public.classroom_quiz_attempts;
+drop policy if exists "Learners and assigned teachers read quiz attempts" on public.classroom_quiz_attempts;
 create policy "Learners and assigned teachers read quiz attempts" on public.classroom_quiz_attempts for select to authenticated using (
   learner_id = (select auth.uid()) or (select public.current_academy_role()) = 'admin'
   or exists (select 1 from public.classroom_assignments a where a.id = assignment_id
     and a.class_id is not null and public.can_manage_class_subject(a.subject_id, a.class_id))
 );
+drop policy if exists "Learners submit quiz attempts" on public.classroom_quiz_attempts;
 create policy "Learners submit quiz attempts" on public.classroom_quiz_attempts for insert to authenticated
   with check (learner_id = (select auth.uid()) and exists (
     select 1 from public.classroom_assignments a where a.id = assignment_id and a.assessment_type = 'quiz'
@@ -212,7 +214,7 @@ insert into public.academic_years(name)
 select distinct trim(sd.academic_year)
 from public.student_details sd
 where length(trim(coalesce(sd.academic_year, ''))) > 0
-on conflict (name) do nothing;
+on conflict do nothing;
 
 insert into public.classes(name, grade, academic_year_id)
 select distinct trim(sd.class_name), trim(sd.class_name), ay.id
@@ -221,7 +223,7 @@ join public.academic_years ay
   on ay.name = trim(sd.academic_year)
 where length(trim(coalesce(sd.class_name, ''))) > 0
   and length(trim(coalesce(sd.academic_year, ''))) > 0
-on conflict (name, academic_year_id) do nothing;
+on conflict do nothing;
 
 -- Preserve each old per-subject enrollee as a class enrollee using exact class/year matches.
 insert into public.student_class_enrollments(student_id, class_id, academic_year_id)
@@ -234,7 +236,7 @@ join public.academic_years ay on ay.id = c.academic_year_id
   and ay.name = trim(sd.academic_year)
 where length(trim(coalesce(sd.class_name, ''))) > 0
   and length(trim(coalesce(sd.academic_year, ''))) > 0
-on conflict (student_id, class_id) do nothing;
+on conflict do nothing;
 
 -- Carry the prior single subject owner forward for each class where that subject was enrolled.
 insert into public.teacher_assignments(teacher_id, subject_id, class_id, academic_year_id)
@@ -248,17 +250,17 @@ join public.academic_years ay on ay.id = c.academic_year_id
 where s.instructor_id is not null
   and length(trim(coalesce(sd.class_name, ''))) > 0
   and length(trim(coalesce(sd.academic_year, ''))) > 0
-on conflict (teacher_id, subject_id, class_id) do nothing;
+on conflict do nothing;
 
 insert into public.class_subjects(subject_id, class_id, academic_year_id)
 select distinct subject_id, class_id, academic_year_id from public.teacher_assignments
-on conflict (subject_id, class_id) do nothing;
+on conflict do nothing;
 
 insert into public.class_subjects(subject_id, class_id, academic_year_id)
 select distinct e.subject_id, sce.class_id, sce.academic_year_id
 from public.enrollments e
 join public.student_class_enrollments sce on sce.student_id = e.learner_id
-on conflict (subject_id, class_id) do nothing;
+on conflict do nothing;
 
 -- Keep the role relationships valid for direct authenticated inserts as well as UI forms.
 create or replace function public.validate_academic_party_roles()
@@ -292,7 +294,7 @@ do $$ begin
     foreign key (subject_id, class_id, academic_year_id)
     references public.class_subjects(subject_id, class_id, academic_year_id) on delete restrict;
 exception when duplicate_object then null;
-end $$;
+end; $$;
 
 -- Keep unmatched legacy rows visible for administrators to reconcile later.
 create table if not exists public.academic_migration_issues (
@@ -316,14 +318,14 @@ left join public.classes c on c.name = trim(sd.class_name)
 left join public.academic_years ay on ay.id = c.academic_year_id
   and ay.name = trim(sd.academic_year)
 where c.id is null or ay.id is null
-on conflict (source_table, source_id) do nothing;
+on conflict do nothing;
 
 insert into public.academic_migration_issues(source_table, source_id, reason)
 select 'subjects', s.id, 'Legacy subject has no class assignment to migrate'
 from public.subjects s
 where s.instructor_id is not null
   and not exists (select 1 from public.teacher_assignments ta where ta.subject_id = s.id)
-on conflict (source_table, source_id) do nothing;
+on conflict do nothing;
 
 create or replace function public.can_manage_subject(requested_subject_id uuid)
 returns boolean language sql stable security definer set search_path = '' as $$
@@ -433,57 +435,69 @@ grant select on public.academic_migration_issues to authenticated;
 
 drop policy if exists "Academic years are readable by signed in users" on public.academic_years;
 drop policy if exists "Admins manage academic years" on public.academic_years;
+drop policy if exists "Academic years are readable by signed in users" on public.academic_years;
 create policy "Academic years are readable by signed in users" on public.academic_years
   for select to authenticated using (true);
+drop policy if exists "Admins manage academic years" on public.academic_years;
 create policy "Admins manage academic years" on public.academic_years
   for all to authenticated using ((select public.current_academy_role()) = 'admin')
   with check ((select public.current_academy_role()) = 'admin');
 
 drop policy if exists "Signed in users read academic terms" on public.academic_terms;
 drop policy if exists "Admins manage academic terms" on public.academic_terms;
+drop policy if exists "Signed in users read academic terms" on public.academic_terms;
 create policy "Signed in users read academic terms" on public.academic_terms for select to authenticated using (true);
+drop policy if exists "Admins manage academic terms" on public.academic_terms;
 create policy "Admins manage academic terms" on public.academic_terms for all to authenticated
   using ((select public.current_academy_role()) = 'admin') with check ((select public.current_academy_role()) = 'admin');
 
 drop policy if exists "Users can read relevant classes" on public.classes;
 drop policy if exists "Admins manage classes" on public.classes;
+drop policy if exists "Users can read relevant classes" on public.classes;
 create policy "Users can read relevant classes" on public.classes for select to authenticated using (
   (select public.current_academy_role()) = 'admin'
   or public.is_teacher_assigned_to_class(id)
   or public.is_enrolled_in_class(id)
 );
+drop policy if exists "Admins manage classes" on public.classes;
 create policy "Admins manage classes" on public.classes for all to authenticated
   using ((select public.current_academy_role()) = 'admin')
   with check ((select public.current_academy_role()) = 'admin');
 
 drop policy if exists "Relevant users can read teacher assignments" on public.teacher_assignments;
 drop policy if exists "Admins manage teacher assignments" on public.teacher_assignments;
+drop policy if exists "Relevant users can read teacher assignments" on public.teacher_assignments;
 create policy "Relevant users can read teacher assignments" on public.teacher_assignments for select to authenticated using (
   teacher_id = (select auth.uid())
   or (select public.current_academy_role()) = 'admin'
   or public.is_enrolled_in_class(teacher_assignments.class_id)
 );
+drop policy if exists "Admins manage teacher assignments" on public.teacher_assignments;
 create policy "Admins manage teacher assignments" on public.teacher_assignments for all to authenticated
   using ((select public.current_academy_role()) = 'admin')
   with check ((select public.current_academy_role()) = 'admin');
 
 drop policy if exists "Users can read offered class subjects" on public.class_subjects;
 drop policy if exists "Admins manage class subjects" on public.class_subjects;
+drop policy if exists "Users can read offered class subjects" on public.class_subjects;
 create policy "Users can read offered class subjects" on public.class_subjects for select to authenticated using (
   (select public.current_academy_role()) = 'admin'
   or public.is_teacher_assigned_to_class(class_id)
   or public.is_enrolled_in_class(class_id)
 );
+drop policy if exists "Admins manage class subjects" on public.class_subjects;
 create policy "Admins manage class subjects" on public.class_subjects for all to authenticated
   using ((select public.current_academy_role()) = 'admin') with check ((select public.current_academy_role()) = 'admin');
 
 drop policy if exists "Users can read relevant class enrollments" on public.student_class_enrollments;
 drop policy if exists "Admins manage class enrollments" on public.student_class_enrollments;
+drop policy if exists "Users can read relevant class enrollments" on public.student_class_enrollments;
 create policy "Users can read relevant class enrollments" on public.student_class_enrollments for select to authenticated using (
   student_id = (select auth.uid())
   or (select public.current_academy_role()) = 'admin'
   or public.is_teacher_assigned_to_class(student_class_enrollments.class_id)
 );
+drop policy if exists "Admins manage class enrollments" on public.student_class_enrollments;
 create policy "Admins manage class enrollments" on public.student_class_enrollments for all to authenticated
   using ((select public.current_academy_role()) = 'admin')
   with check ((select public.current_academy_role()) = 'admin');
@@ -499,6 +513,7 @@ drop policy if exists "Authenticated users can read subjects" on public.subjects
 drop policy if exists "Users can read assigned or enrolled subjects" on public.subjects;
 drop policy if exists "Admins manage global subjects" on public.subjects;
 revoke delete on public.subjects from authenticated;
+drop policy if exists "Users can read assigned or enrolled subjects" on public.subjects;
 create policy "Users can read assigned or enrolled subjects" on public.subjects for select to authenticated using (
   (select public.current_academy_role()) = 'admin'
   or exists (select 1 from public.teacher_assignments ta where ta.subject_id = subjects.id and ta.teacher_id = (select auth.uid()))
@@ -508,8 +523,10 @@ create policy "Users can read assigned or enrolled subjects" on public.subjects 
 );
 drop policy if exists "Admins create global subjects" on public.subjects;
 drop policy if exists "Admins update global subjects" on public.subjects;
+drop policy if exists "Admins create global subjects" on public.subjects;
 create policy "Admins create global subjects" on public.subjects for insert to authenticated
   with check ((select public.current_academy_role()) = 'admin');
+drop policy if exists "Admins update global subjects" on public.subjects;
 create policy "Admins update global subjects" on public.subjects for update to authenticated
   using ((select public.current_academy_role()) = 'admin')
   with check ((select public.current_academy_role()) = 'admin');
@@ -517,30 +534,37 @@ create policy "Admins update global subjects" on public.subjects for update to a
 drop policy if exists "Learners and subject instructors can read enrollments" on public.enrollments;
 drop policy if exists "Instructors and admins can enroll learners" on public.enrollments;
 drop policy if exists "Instructors and admins can remove enrollments" on public.enrollments;
+drop policy if exists "Relevant users can read legacy subject enrollments" on public.enrollments;
 create policy "Relevant users can read legacy subject enrollments" on public.enrollments for select to authenticated using (
   learner_id = (select auth.uid()) or (select public.current_academy_role()) = 'admin'
   or exists (select 1 from public.teacher_assignments ta where ta.subject_id = enrollments.subject_id and ta.teacher_id = (select auth.uid()))
 );
+drop policy if exists "Admins manage legacy subject enrollments" on public.enrollments;
 create policy "Admins manage legacy subject enrollments" on public.enrollments for all to authenticated
   using ((select public.current_academy_role()) = 'admin') with check ((select public.current_academy_role()) = 'admin');
 
 drop policy if exists "Teachers manage assigned lessons" on public.lessons;
 drop policy if exists "Students read published lessons in their classes" on public.lessons;
+drop policy if exists "Teachers manage assigned lessons" on public.lessons;
 create policy "Teachers manage assigned lessons" on public.lessons for all to authenticated
   using (public.can_manage_class_subject(subject_id, class_id))
   with check (teacher_id = (select auth.uid()) and public.can_manage_class_subject(subject_id, class_id));
+drop policy if exists "Students read published lessons in their classes" on public.lessons;
 create policy "Students read published lessons in their classes" on public.lessons for select to authenticated
   using (is_published and public.is_enrolled_in_class_subject(subject_id, class_id));
 
 drop policy if exists "Learners read their lesson completions" on public.lesson_completions;
 drop policy if exists "Learners complete published enrolled lessons" on public.lesson_completions;
 drop policy if exists "Learners undo their lesson completions" on public.lesson_completions;
+drop policy if exists "Learners read their lesson completions" on public.lesson_completions;
 create policy "Learners read their lesson completions" on public.lesson_completions for select to authenticated
   using (learner_id = (select auth.uid()));
+drop policy if exists "Learners complete published enrolled lessons" on public.lesson_completions;
 create policy "Learners complete published enrolled lessons" on public.lesson_completions for insert to authenticated
   with check (learner_id = (select auth.uid()) and exists (
     select 1 from public.lessons l where l.id = lesson_id and l.is_published
       and public.is_enrolled_in_class_subject(l.subject_id, l.class_id)));
+drop policy if exists "Learners undo their lesson completions" on public.lesson_completions;
 create policy "Learners undo their lesson completions" on public.lesson_completions for delete to authenticated
   using (learner_id = (select auth.uid()));
 
@@ -555,6 +579,7 @@ create policy "Classroom members can read documents" on public.classroom_documen
     or public.can_manage_legacy_subject(subject_id)
     or ((select public.current_academy_role()) = 'learner' and public.is_enrolled_in_subject(subject_id))))
 );
+drop policy if exists "Assigned teachers manage classroom documents" on public.classroom_documents;
 create policy "Assigned teachers manage classroom documents" on public.classroom_documents for all to authenticated
   using (class_id is not null and public.can_manage_class_subject(subject_id, class_id))
   with check (uploaded_by = (select auth.uid()) and class_id is not null and public.can_manage_class_subject(subject_id, class_id));
@@ -572,6 +597,7 @@ create policy "Classroom members can read assignments" on public.classroom_assig
     or public.can_manage_legacy_subject(subject_id)
     or ((select public.current_academy_role()) = 'learner' and public.is_enrolled_in_subject(subject_id))))
 );
+drop policy if exists "Assigned teachers manage assignments" on public.classroom_assignments;
 create policy "Assigned teachers manage assignments" on public.classroom_assignments for all to authenticated
   using (class_id is not null and public.can_manage_class_subject(subject_id, class_id))
   with check (created_by = (select auth.uid()) and class_id is not null and public.can_manage_class_subject(subject_id, class_id));
@@ -583,11 +609,13 @@ create policy "Admins manage legacy classless assignments" on public.classroom_a
 drop policy if exists "Classroom members can read attendance" on public.classroom_attendance;
 drop policy if exists "Teachers can record attendance" on public.classroom_attendance;
 drop policy if exists "Teachers can update attendance" on public.classroom_attendance;
+drop policy if exists "Class members can read attendance" on public.classroom_attendance;
 create policy "Class members can read attendance" on public.classroom_attendance for select to authenticated using (
   learner_id = (select auth.uid()) or (select public.current_academy_role()) = 'admin'
   or (class_id is not null and public.can_manage_class_subject(subject_id, class_id))
   or (class_id is null and public.can_manage_legacy_subject(subject_id))
 );
+drop policy if exists "Assigned teachers manage attendance" on public.classroom_attendance;
 create policy "Assigned teachers manage attendance" on public.classroom_attendance for all to authenticated
   using (class_id is not null and public.can_manage_class_subject(subject_id, class_id))
   with check (recorded_by = (select auth.uid()) and class_id is not null
@@ -604,16 +632,18 @@ create policy "Classroom members can read submissions" on public.classroom_submi
      or (a.class_id is null and ((select public.current_academy_role()) = 'admin'
        or public.can_manage_legacy_subject(a.subject_id)))))
 );
+drop policy if exists "Enrolled learners submit work in assigned classes" on public.classroom_submissions;
 create policy "Enrolled learners submit work in assigned classes" on public.classroom_submissions for insert to authenticated
   with check (learner_id = (select auth.uid()) and exists (
     select 1 from public.classroom_assignments a where a.id = assignment_id
       and ((a.class_id is not null and public.is_enrolled_in_class_subject(a.subject_id, a.class_id))
         or (a.class_id is null and public.is_enrolled_in_subject(a.subject_id)))));
+drop policy if exists "Learners replace own submissions in enrolled classes" on public.classroom_submissions;
 create policy "Learners replace own submissions in enrolled classes" on public.classroom_submissions for update to authenticated
   using (learner_id = (select auth.uid()) and exists (
     select 1 from public.classroom_assignments a where a.id = assignment_id
       and ((a.class_id is not null and public.is_enrolled_in_class_subject(a.subject_id, a.class_id))
-        or (a.class_id is null and public.is_enrolled_in_subject(a.subject_id))))
+        or (a.class_id is null and public.is_enrolled_in_subject(a.subject_id)))))
   with check (learner_id = (select auth.uid()) and exists (
     select 1 from public.classroom_assignments a where a.id = assignment_id
       and ((a.class_id is not null and public.is_enrolled_in_class_subject(a.subject_id, a.class_id))
@@ -622,6 +652,7 @@ create policy "Learners replace own submissions in enrolled classes" on public.c
 drop policy if exists "Subject instructors and admins can record marks" on public.marks;
 drop policy if exists "Mark authors and admins can update marks" on public.marks;
 drop policy if exists "Mark authors and admins can delete marks" on public.marks;
+drop policy if exists "Assigned teachers record marks" on public.marks;
 create policy "Assigned teachers record marks" on public.marks for insert to authenticated with check (
   recorded_by = (select auth.uid()) and (
     (select public.current_academy_role()) = 'admin'
@@ -635,6 +666,7 @@ create policy "Assigned teachers record marks" on public.marks for insert to aut
 
 drop policy if exists "Subject instructors and admins can read marks" on public.marks;
 drop policy if exists "Learners, subject instructors, and admins can read marks" on public.marks;
+drop policy if exists "Learners assigned teachers and admins can read marks" on public.marks;
 create policy "Learners assigned teachers and admins can read marks" on public.marks for select to authenticated using (
   learner_id = (select auth.uid()) or (select public.current_academy_role()) = 'admin'
   or exists (select 1 from public.teacher_assignments ta
@@ -643,6 +675,7 @@ create policy "Learners assigned teachers and admins can read marks" on public.m
       and ta.teacher_id = (select auth.uid()) and sce.student_id = marks.learner_id)
   or (marks.class_id is null and public.can_manage_legacy_subject(marks.subject_id))
 );
+drop policy if exists "Assigned teachers update marks" on public.marks;
 create policy "Assigned teachers update marks" on public.marks for update to authenticated
   using (
     (select public.current_academy_role()) = 'admin'
@@ -666,10 +699,12 @@ create policy "Assigned teachers update marks" on public.marks for update to aut
       )
     ))
   );
+drop policy if exists "Admins delete marks" on public.marks;
 create policy "Admins delete marks" on public.marks for delete to authenticated
   using ((select public.current_academy_role()) = 'admin');
 
 drop policy if exists "Enrolled learners and their instructors can start conversations" on public.conversations;
+drop policy if exists "Assigned teachers and enrolled learners can start conversations" on public.conversations;
 create policy "Assigned teachers and enrolled learners can start conversations" on public.conversations for insert to authenticated
 with check (
   exists (select 1 from public.teacher_assignments ta
@@ -687,6 +722,7 @@ with check (
 drop policy if exists "Classroom members can download materials" on storage.objects;
 drop policy if exists "Teachers can upload materials" on storage.objects;
 drop policy if exists "Teachers can delete unlinked materials" on storage.objects;
+drop policy if exists "Learners and admins download legacy materials" on storage.objects;
 create policy "Learners and admins download legacy materials" on storage.objects for select to authenticated using (
   bucket_id = 'classroom-files' and (storage.foldername(name))[1] = 'subjects'
   and (storage.foldername(name))[3] = 'materials'
@@ -696,6 +732,7 @@ create policy "Learners and admins download legacy materials" on storage.objects
       or ((select public.current_academy_role()) = 'learner' and public.is_enrolled_in_subject(s.id))))
 );
 drop policy if exists "Classroom members can download submissions" on storage.objects;
+drop policy if exists "Learners and admins download legacy submissions" on storage.objects;
 create policy "Learners and admins download legacy submissions" on storage.objects for select to authenticated using (
   bucket_id = 'classroom-files' and (storage.foldername(name))[1] = 'subjects'
   and (storage.foldername(name))[3] = 'submissions'
@@ -707,6 +744,7 @@ create policy "Learners and admins download legacy submissions" on storage.objec
         and (storage.foldername(name))[5] = (select auth.uid())::text
         and public.is_enrolled_in_subject(a.subject_id))))
 );
+drop policy if exists "Assigned class members download class materials" on storage.objects;
 create policy "Assigned class members download class materials" on storage.objects for select to authenticated using (
   bucket_id = 'classroom-files' and (storage.foldername(name))[1] = 'subjects'
   and (storage.foldername(name))[3] = 'classes' and (storage.foldername(name))[5] = 'materials'
@@ -715,6 +753,7 @@ create policy "Assigned class members download class materials" on storage.objec
       and (public.can_manage_class_subject(s.id, (storage.foldername(name))[4]::uuid)
         or public.is_enrolled_in_class_subject(s.id, (storage.foldername(name))[4]::uuid)))
 );
+drop policy if exists "Assigned teachers upload class materials" on storage.objects;
 create policy "Assigned teachers upload class materials" on storage.objects for insert to authenticated with check (
   bucket_id = 'classroom-files' and (storage.foldername(name))[1] = 'subjects'
   and (storage.foldername(name))[3] = 'classes' and (storage.foldername(name))[5] = 'materials'
@@ -722,12 +761,14 @@ create policy "Assigned teachers upload class materials" on storage.objects for 
     where s.id::text = (storage.foldername(name))[2] and s.archived_at is null
       and public.can_manage_class_subject(s.id, (storage.foldername(name))[4]::uuid))
 );
+drop policy if exists "Assigned teachers remove unlinked class materials" on storage.objects;
 create policy "Assigned teachers remove unlinked class materials" on storage.objects for delete to authenticated using (
   bucket_id = 'classroom-files' and (storage.foldername(name))[1] = 'subjects'
   and (storage.foldername(name))[3] = 'classes' and (storage.foldername(name))[5] = 'materials'
   and public.can_manage_class_subject((storage.foldername(name))[2]::uuid, (storage.foldername(name))[4]::uuid)
   and not exists (select 1 from public.classroom_documents d where d.storage_path = storage.objects.name)
 );
+drop policy if exists "Assigned class members download submissions" on storage.objects;
 create policy "Assigned class members download submissions" on storage.objects for select to authenticated using (
   bucket_id = 'classroom-files' and (storage.foldername(name))[1] = 'subjects'
   and (storage.foldername(name))[3] = 'classes' and (storage.foldername(name))[5] = 'submissions'
@@ -739,6 +780,7 @@ create policy "Assigned class members download submissions" on storage.objects f
         or ((storage.foldername(name))[7] = (select auth.uid())::text
           and public.is_enrolled_in_class_subject(a.subject_id, a.class_id))))
 );
+drop policy if exists "Enrolled learners upload class submissions" on storage.objects;
 create policy "Enrolled learners upload class submissions" on storage.objects for insert to authenticated with check (
   bucket_id = 'classroom-files' and (storage.foldername(name))[1] = 'subjects'
   and (storage.foldername(name))[3] = 'classes' and (storage.foldername(name))[5] = 'submissions'
@@ -749,6 +791,7 @@ create policy "Enrolled learners upload class submissions" on storage.objects fo
       and a.class_id::text = (storage.foldername(name))[4]
       and s.archived_at is null and public.is_enrolled_in_class_subject(a.subject_id, a.class_id))
 );
+drop policy if exists "Learners delete unlinked class submissions" on storage.objects;
 create policy "Learners delete unlinked class submissions" on storage.objects for delete to authenticated using (
   bucket_id = 'classroom-files' and (storage.foldername(name))[3] = 'classes'
   and (storage.foldername(name))[5] = 'submissions'

@@ -246,9 +246,16 @@ type Subject = {
   assignmentCount?: number
 }
 
-type AcademicClass = { id: string; name: string; grade: string; description: string; academic_year_id: string }
+type AcademicClass = { id: string; name: string; grade: string; stream: string; description: string; academic_year_id: string }
 type AcademicSubject = { id: string; name: string; level: 'O Level' | 'A Level'; code: string; description: string; archived_at: string | null }
 type AcademicPerson = { id: string; full_name: string; username: string; role: 'learner' | 'instructor' | 'admin' }
+
+function academicClassLabel(item: Pick<AcademicClass, 'name' | 'grade' | 'stream'>) {
+  const name = item.name.trim()
+  const grade = item.grade.trim()
+  const label = grade && grade.toLowerCase() !== name.toLowerCase() ? `${name} (${grade})` : name || grade
+  return item.stream ? `${label} · Section ${item.stream}` : label
+}
 
 type Profile = {
   name: string
@@ -371,47 +378,47 @@ function Sidebar({
   onLogout: () => void
 }) {
   return (
-    <aside className="sidebar fixed inset-y-0 left-0 z-40 hidden w-[250px] flex-col bg-[#5D866C] px-4 py-6 text-white lg:flex">
-      <div className="px-2">
+    <aside className="sidebar fixed inset-y-0 left-0 z-40 hidden max-h-dvh w-[250px] flex-col overflow-hidden bg-[#5D866C] px-3 py-3 text-white lg:flex">
+      <div className="shrink-0 px-1">
         <Logo academyName={academyName} />
       </div>
-      <nav className="mt-12 flex-1 space-y-1.5">
-        <p className="px-3 pb-2 text-[10px] font-bold uppercase tracking-[.18em] text-white/45">
+      <nav className="mt-4 min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain pr-1">
+        <p className="px-2.5 pb-1.5 text-[9px] font-bold uppercase tracking-[.16em] text-white/45">
           Workspace
         </p>
         {navByRole[role].map((item) => (
           <button
             key={item.label}
             onClick={() => setActive(item.label)}
-            className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold transition ${active === item.label ? 'bg-white text-[#31533d] shadow-sm' : 'text-white/70 hover:bg-white/10 hover:text-white'}`}
+            className={`flex w-full min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs font-semibold transition ${active === item.label ? 'bg-white text-[#31533d] shadow-sm' : 'text-white/70 hover:bg-white/10 hover:text-white'}`}
           >
-            <Icon name={item.icon} size={19} />
-            {item.label}
+            <Icon name={item.icon} size={16} className="shrink-0" />
+            <span className="min-w-0 truncate">{item.label}</span>
           </button>
         ))}
       </nav>
-      <div className="space-y-1 border-t border-white/15 pt-4">
+      <div className="shrink-0 space-y-0.5 border-t border-white/15 pt-2">
         <button
           onClick={onProfile}
-          className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-white/65 hover:bg-white/10 hover:text-white"
+          className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs text-white/65 hover:bg-white/10 hover:text-white"
         >
-          <Icon name="user" size={18} />
+          <Icon name="user" size={16} />
           Edit profile
         </button>
         <button
           onClick={onLogout}
-          className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-white/65 hover:bg-white/10 hover:text-white"
+          className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs text-white/65 hover:bg-white/10 hover:text-white"
         >
-          <Icon name="logout" size={18} />
+          <Icon name="logout" size={16} />
           Log out
         </button>
-        <div className="mt-3 flex items-center gap-3 rounded-xl bg-[#31533d]/40 p-3">
-          <Avatar initials={initials(profile.name)} image={profile.image} />
+        <div className="mt-2 flex min-w-0 items-center gap-2.5 rounded-lg bg-[#31533d]/40 p-2">
+          <Avatar initials={initials(profile.name)} image={profile.image} small />
           <div className="min-w-0">
             <p className="truncate text-xs font-bold">{profile.name}</p>
             <p className="text-[10px] text-white/50">{role} account</p>
           </div>
-          <Icon name="more" size={17} className="ml-auto text-white/50" />
+          <Icon name="more" size={15} className="ml-auto shrink-0 text-white/50" />
         </div>
       </div>
     </aside>
@@ -927,6 +934,17 @@ type AdminOverviewData = {
   recentUsers: { id: string; name: string; role: string; createdAt: string }[]
 }
 
+function formatAcademicDataError(error: unknown) {
+  const detail: { code?: unknown; message?: unknown } = error && typeof error === 'object'
+    ? error as { code?: unknown; message?: unknown }
+    : {}
+  const message = typeof detail.message === 'string' ? detail.message : ''
+  if (detail.code === 'PGRST205' || /could not find the table .* in the schema cache/i.test(message)) {
+    return 'The academic structure is not available in Supabase yet. Apply supabase/migrations/202611210001_academic_structure.sql. If it was already applied, refresh the Supabase API schema cache, then reload this page.'
+  }
+  return message || 'Could not load the academic data.'
+}
+
 function AdminDashboard({
   supabase,
   onManageUsers,
@@ -1031,7 +1049,7 @@ function AdminDashboard({
         })),
       })
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'Could not load live academy data.')
+      setError(formatAcademicDataError(loadError))
     } finally {
       setLoading(false)
     }
@@ -1371,7 +1389,8 @@ function AdminAcademicPage({ supabase, section }: { supabase: SupabaseClient; se
   const [subjectLevel, setSubjectLevel] = useState<'O Level' | 'A Level'>('O Level')
   const [subjectDescription, setSubjectDescription] = useState('')
   const [className, setClassName] = useState('')
-  const [classGrade, setClassGrade] = useState('')
+  const [classGrade, setClassGrade] = useState('Form 1')
+  const [classStream, setClassStream] = useState('')
   const [classDescription, setClassDescription] = useState('')
   const [academicYear, setAcademicYear] = useState(String(new Date().getFullYear()))
   const [termName, setTermName] = useState('')
@@ -1386,13 +1405,17 @@ function AdminAcademicPage({ supabase, section }: { supabase: SupabaseClient; se
   const [offeredClassId, setOfferedClassId] = useState('')
   const [studentId, setStudentId] = useState('')
   const [enrollmentClassId, setEnrollmentClassId] = useState('')
+  const [materialSubjectId, setMaterialSubjectId] = useState('')
+  const [materialClassId, setMaterialClassId] = useState('')
+  const [materialTitle, setMaterialTitle] = useState('')
+  const [materialFile, setMaterialFile] = useState<File | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     setError('')
     const [yearResult, classResult, subjectResult, peopleResult, assignmentResult, enrollmentResult, issueResult, classSubjectsResult, termResult] = await Promise.all([
       supabase.from('academic_years').select('id, name').order('name', { ascending: false }),
-      supabase.from('classes').select('id, name, grade, description, academic_year_id').order('name'),
+      supabase.from('classes').select('id, name, grade, stream, description, academic_year_id').order('name'),
       supabase.from('subjects').select('id, name, level, code, description, archived_at').order('name'),
       supabase.from('profiles').select('id, full_name, username, role').in('role', ['learner', 'instructor']).order('full_name'),
       supabase.from('teacher_assignments').select('id, teacher_id, subject_id, class_id, academic_year_id'),
@@ -1402,7 +1425,7 @@ function AdminAcademicPage({ supabase, section }: { supabase: SupabaseClient; se
       supabase.from('academic_terms').select('id, academic_year_id, name, starts_on, ends_on').order('starts_on'),
     ])
     const failed = [yearResult, classResult, subjectResult, peopleResult, assignmentResult, enrollmentResult, issueResult, classSubjectsResult, termResult].find((result) => result.error)
-    if (failed?.error) setError(`Could not load academic management data: ${failed.error.message}`)
+    if (failed?.error) setError(`Could not load academic management data: ${formatAcademicDataError(failed.error)}`)
     else {
       setYears(yearResult.data ?? [])
       setClasses(classResult.data ?? [])
@@ -1439,13 +1462,13 @@ function AdminAcademicPage({ supabase, section }: { supabase: SupabaseClient; se
     const yearName = academicYear.trim()
     const { data: year, error: yearError } = await supabase.from('academic_years').upsert({ name: yearName }, { onConflict: 'name' }).select('id').single()
     if (yearError) { setSaving(false); setError(yearError.message); return }
-    const values = { name: className.trim(), grade: classGrade.trim(), description: classDescription.trim(), academic_year_id: year.id }
+    const values = { name: className.trim(), grade: classGrade.trim(), stream: classStream, description: classDescription.trim(), academic_year_id: year.id }
     const result = editingClass
       ? await supabase.from('classes').update(values).eq('id', editingClass.id).select('id').maybeSingle()
       : await supabase.from('classes').insert(values).select('id').maybeSingle()
     setSaving(false)
     if (result.error || !result.data) { setError(result.error?.message ?? 'Class was not saved.'); return }
-    setClassName(''); setClassGrade(''); setClassDescription(''); setEditingClass(null)
+    setClassName(''); setClassGrade('Form 1'); setClassStream(''); setClassDescription(''); setEditingClass(null)
     setMessage(editingClass ? 'Class updated.' : 'Class created.')
     await load()
   }
@@ -1500,6 +1523,43 @@ function AdminAcademicPage({ supabase, section }: { supabase: SupabaseClient; se
     setTermName(''); setTermStart(''); setTermEnd(''); setMessage('Academic term created.'); await load()
   }
 
+  const uploadSubjectMaterial = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!materialSubjectId || !materialClassId || !materialFile || !materialTitle.trim()) return
+    if (!classSubjects.some((item) => item.subject_id === materialSubjectId && item.class_id === materialClassId)) {
+      setError('Offer this subject to the selected class before uploading material.')
+      return
+    }
+    setSaving(true); setError(''); setMessage('')
+    let storagePath = ''
+    let fileUploaded = false
+    try {
+      const { data: { user }, error: userError } = await supabase.auth.getUser()
+      if (userError || !user) throw new Error(userError?.message ?? 'Your admin session is no longer valid.')
+      const mimeType = getClassroomFileMimeType(materialFile)
+      storagePath = `subjects/${materialSubjectId}/classes/${materialClassId}/materials/${crypto.randomUUID()}-${safeClassroomFileName(materialFile.name)}`
+      const { error: uploadError } = await supabase.storage.from(classroomBucket).upload(storagePath, materialFile, { contentType: mimeType, upsert: false })
+      if (uploadError) throw uploadError
+      fileUploaded = true
+      const { error: insertError } = await supabase.from('classroom_documents').insert({
+        subject_id: materialSubjectId, class_id: materialClassId, uploaded_by: user.id,
+        title: materialTitle.trim(), file_name: materialFile.name, storage_path: storagePath,
+        mime_type: mimeType, size_bytes: materialFile.size,
+      })
+      if (insertError) throw insertError
+      setMaterialTitle(''); setMaterialFile(null); setMessage('Subject material uploaded for the selected class.')
+    } catch (uploadError) {
+      let errorMessage = uploadError instanceof Error ? uploadError.message : 'Could not upload the subject material.'
+      if (fileUploaded && storagePath) {
+        const { error: cleanupError } = await supabase.storage.from(classroomBucket).remove([storagePath])
+        if (cleanupError) errorMessage = `${errorMessage} Temporary upload cleanup failed: ${cleanupError.message}`
+      }
+      setError(errorMessage)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const removeRecord = async (table: 'teacher_assignments' | 'student_class_enrollments' | 'classes', id: string, prompt: string) => {
     if (!window.confirm(prompt)) return
     const { error: removeError } = await supabase.from(table).delete().eq('id', id)
@@ -1522,16 +1582,82 @@ function AdminAcademicPage({ supabase, section }: { supabase: SupabaseClient; se
           <div className="divide-y divide-[#31533d]/8">{filteredSubjects.map((subject) => <article key={subject.id} className="flex flex-wrap items-center justify-between gap-3 p-4"><div><p className="font-semibold text-[#284633]">{subject.name} <span className="text-xs font-normal text-[#789083]">{subject.code} · {subject.level}</span></p><p className="mt-1 text-xs text-[#789083]">{subject.description || 'No description'}{subject.archived_at ? ' · Inactive' : ''}</p></div><div className="flex gap-2"><button type="button" className="secondary-button" onClick={() => { setEditingSubject(subject); setSubjectName(subject.name); setSubjectCode(subject.code); setSubjectLevel(subject.level); setSubjectDescription(subject.description) }}>Edit</button><button type="button" className="secondary-button" onClick={async () => { const archived_at = subject.archived_at ? null : new Date().toISOString(); const { error: updateError } = await supabase.from('subjects').update({ archived_at }).eq('id', subject.id); if (updateError) setError(updateError.message); else { setMessage(archived_at ? 'Subject deactivated. Historical records are retained.' : 'Subject reactivated.'); await load() } }}>{subject.archived_at ? 'Reactivate' : 'Deactivate'}</button></div></article>)}{!filteredSubjects.length && <p className="p-5 text-sm text-[#789083]">No subjects match your search.</p>}</div>
         </section>
         <div className="space-y-5">
-          <form onSubmit={offerSubjectToClass} className="card space-y-4 p-5"><h2 className="font-display text-lg font-bold">Offer a subject to a class</h2><p className="text-xs leading-5 text-[#789083]">Subjects exist independently of teachers. Allocate a teacher separately in Teacher Assignments.</p><Field label="Subject"><select className="form-input" value={subjectOfferId} onChange={(event) => setSubjectOfferId(event.target.value)} required><option value="">Select subject</option>{subjects.filter((item) => !item.archived_at).map((item) => <option key={item.id} value={item.id}>{item.name} ({item.code})</option>)}</select></Field><Field label="Class"><select className="form-input" value={offeredClassId} onChange={(event) => setOfferedClassId(event.target.value)} required><option value="">Select class</option>{classes.map((item) => <option key={item.id} value={item.id}>{item.name} · {years.find((year) => year.id === item.academic_year_id)?.name}</option>)}</select></Field><button className="primary-button" disabled={saving}>Associate subject and class</button><div className="border-t border-[#31533d]/8 pt-3">{classSubjects.map((item) => <p key={item.id} className="py-1 text-xs text-[#789083]">{subjects.find((subject) => subject.id === item.subject_id)?.name} · {classes.find((cls) => cls.id === item.class_id)?.name}</p>)}</div></form>
+          <form onSubmit={offerSubjectToClass} className="card space-y-4 p-5"><h2 className="font-display text-lg font-bold">Offer a subject to a class</h2><p className="text-xs leading-5 text-[#789083]">Subjects exist independently of teachers. Allocate a teacher separately in Teacher Assignments.</p><Field label="Subject"><select className="form-input" value={subjectOfferId} onChange={(event) => setSubjectOfferId(event.target.value)} required><option value="">Select subject</option>{subjects.filter((item) => !item.archived_at).map((item) => <option key={item.id} value={item.id}>{item.name} ({item.code})</option>)}</select></Field><Field label="Class"><select className="form-input" value={offeredClassId} onChange={(event) => setOfferedClassId(event.target.value)} required><option value="">Select class</option>{classes.map((item) => <option key={item.id} value={item.id}>{academicClassLabel(item)} · {years.find((year) => year.id === item.academic_year_id)?.name}</option>)}</select></Field><button className="primary-button" disabled={saving}>Associate subject and class</button><div className="border-t border-[#31533d]/8 pt-3">{classSubjects.map((item) => <p key={item.id} className="py-1 text-xs text-[#789083]">{subjects.find((subject) => subject.id === item.subject_id)?.name} · {academicClassLabel(classes.find((cls) => cls.id === item.class_id) ?? { name: 'Class', grade: '', stream: '' })}</p>)}</div></form>
           <form onSubmit={saveSubject} className="card space-y-4 p-5"><h2 className="font-display text-lg font-bold">{editingSubject ? 'Edit subject' : 'Create subject'}</h2><Field label="Subject name"><input className="form-input" value={subjectName} onChange={(event) => setSubjectName(event.target.value)} maxLength={120} required /></Field><div className="grid gap-4 sm:grid-cols-2"><Field label="Subject code"><input className="form-input" value={subjectCode} onChange={(event) => setSubjectCode(event.target.value)} maxLength={40} required /></Field><Field label="Level"><select className="form-input" value={subjectLevel} onChange={(event) => setSubjectLevel(event.target.value as AcademicSubject['level'])}><option>O Level</option><option>A Level</option></select></Field></div><Field label="Description"><textarea className="form-input min-h-24" value={subjectDescription} onChange={(event) => setSubjectDescription(event.target.value)} maxLength={1000} /></Field><div className="flex justify-end gap-2">{editingSubject && <button type="button" className="secondary-button" onClick={() => { setEditingSubject(null); setSubjectName(''); setSubjectCode(''); setSubjectDescription('') }}>Cancel</button>}<button className="primary-button" disabled={saving}>{saving ? 'Saving…' : editingSubject ? 'Save subject' : 'Create subject'}</button></div></form>
+          <form onSubmit={uploadSubjectMaterial} className="card space-y-4 p-5">
+            <div><h2 className="font-display text-lg font-bold">Upload subject material</h2><p className="mt-1 text-xs leading-5 text-[#789083]">Admins can add a resource for any class offering. Assigned teachers can also upload resources from their subject workspace.</p></div>
+            <Field label="Subject"><select className="form-input" value={materialSubjectId} onChange={(event) => { setMaterialSubjectId(event.target.value); setMaterialClassId('') }} required><option value="">Select subject</option>{subjects.filter((item) => !item.archived_at).map((item) => <option key={item.id} value={item.id}>{item.name} ({item.code})</option>)}</select></Field>
+            <Field label="Class"><select className="form-input" value={materialClassId} onChange={(event) => setMaterialClassId(event.target.value)} required><option value="">Select class</option>{classes.filter((item) => classSubjects.some((offering) => offering.subject_id === materialSubjectId && offering.class_id === item.id)).map((item) => <option key={item.id} value={item.id}>{academicClassLabel(item)}</option>)}</select></Field>
+            <Field label="Resource title"><input className="form-input" value={materialTitle} onChange={(event) => setMaterialTitle(event.target.value)} maxLength={160} required placeholder="e.g. Form 1 algebra notes" /></Field>
+            <Field label="PDF, Word, or PowerPoint file"><input key={materialFile ? 'selected-material' : 'empty-material'} className="form-input" type="file" accept=".pdf,.doc,.docx,.pptx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation" onChange={(event) => setMaterialFile(event.target.files?.[0] ?? null)} required /></Field>
+            <button className="primary-button" disabled={saving || !materialSubjectId || !materialClassId}>{saving ? 'Uploading…' : 'Upload material'}</button>
+          </form>
         </div>
       </div>}
 
-      {section === 'Classes & Grades' && <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(300px,.8fr)]"><section className="card divide-y divide-[#31533d]/8"><h2 className="font-display p-5 text-lg font-bold">Classes by academic year</h2>{classes.map((item) => <article key={item.id} className="flex items-center justify-between gap-3 p-4"><div><p className="font-semibold">{item.name} <span className="text-xs font-normal text-[#789083]">{item.grade}</span></p><p className="text-xs text-[#789083]">{years.find((year) => year.id === item.academic_year_id)?.name} · {item.description || 'No description'}</p></div><div className="flex gap-2"><button className="secondary-button" type="button" onClick={() => { setEditingClass(item); setClassName(item.name); setClassGrade(item.grade); setClassDescription(item.description); setAcademicYear(years.find((year) => year.id === item.academic_year_id)?.name ?? '') }}>Edit</button><button className="secondary-button" type="button" onClick={() => void removeRecord('classes', item.id, `Remove ${item.name}? This only succeeds when no enrollments or assignments reference this class.`)}>Remove</button></div></article>)}{!classes.length && <p className="p-5 text-sm text-[#789083]">No classes created yet.</p>}</section><form onSubmit={saveClass} className="card space-y-4 p-5"><h2 className="font-display text-lg font-bold">{editingClass ? 'Edit class' : 'Create class or grade'}</h2><Field label="Class name"><input className="form-input" value={className} onChange={(event) => setClassName(event.target.value)} maxLength={100} required /></Field><Field label="Grade"><input className="form-input" value={classGrade} onChange={(event) => setClassGrade(event.target.value)} maxLength={100} required /></Field><Field label="Academic year"><input className="form-input" value={academicYear} onChange={(event) => setAcademicYear(event.target.value)} maxLength={40} required placeholder="e.g. 2026" /></Field><Field label="Description"><textarea className="form-input min-h-20" value={classDescription} onChange={(event) => setClassDescription(event.target.value)} maxLength={500} /></Field><button className="primary-button" disabled={saving}>{saving ? 'Saving…' : editingClass ? 'Save class' : 'Create class'}</button></form></div>}
+      {section === 'Classes & Grades' && (
+        <>
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(300px,.8fr)]">
+            <section className="card divide-y divide-[#31533d]/8">
+              <h2 className="font-display p-5 text-lg font-bold">Classes by academic year</h2>
+              {classes.map((item) => (
+                <article key={item.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
+                  <div>
+                    <p className="font-semibold">{academicClassLabel(item)}</p>
+                    <p className="text-xs text-[#789083]">{years.find((year) => year.id === item.academic_year_id)?.name} · {item.description || 'No description'}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button className="secondary-button" type="button" onClick={() => { setEditingClass(item); setClassName(item.name); setClassGrade(item.grade); setClassStream(item.stream); setClassDescription(item.description); setAcademicYear(years.find((year) => year.id === item.academic_year_id)?.name ?? '') }}>Edit</button>
+                    <button className="secondary-button" type="button" onClick={() => void removeRecord('classes', item.id, `Remove ${academicClassLabel(item)}? This only succeeds when no enrollments or assignments reference this class.`)}>Remove</button>
+                  </div>
+                </article>
+              ))}
+              {!classes.length && <p className="p-5 text-sm text-[#789083]">No classes created yet.</p>}
+            </section>
+            <form onSubmit={saveClass} className="card space-y-4 p-5">
+              <h2 className="font-display text-lg font-bold">{editingClass ? 'Edit class' : 'Create class or grade'}</h2>
+              <Field label="Class name"><input className="form-input" value={className} onChange={(event) => setClassName(event.target.value)} maxLength={100} required placeholder="e.g. Form 1" /></Field>
+              <Field label="Form level">
+                <select className="form-input" value={classGrade} onChange={(event) => setClassGrade(event.target.value)} required>
+                  {!['Form 1', 'Form 2', 'Form 3', 'Form 4', 'Form 5', 'Form 6'].includes(classGrade) && <option value={classGrade}>{classGrade}</option>}
+                  {['Form 1', 'Form 2', 'Form 3', 'Form 4', 'Form 5', 'Form 6'].map((form) => <option key={form} value={form}>{form}</option>)}
+                </select>
+              </Field>
+              <Field label="Section (optional)">
+                <select className="form-input" value={classStream} onChange={(event) => setClassStream(event.target.value)}>
+                  <option value="">No section</option>
+                  {['A', 'B', 'C', 'D', 'E'].map((sectionName) => <option key={sectionName} value={sectionName}>Section {sectionName}</option>)}
+                </select>
+              </Field>
+              <Field label="Academic year"><input className="form-input" value={academicYear} onChange={(event) => setAcademicYear(event.target.value)} maxLength={40} required placeholder="e.g. 2026" /></Field>
+              <Field label="Description"><textarea className="form-input min-h-20" value={classDescription} onChange={(event) => setClassDescription(event.target.value)} maxLength={500} /></Field>
+              <div className="flex justify-end gap-2">
+                {editingClass && <button type="button" className="secondary-button" onClick={() => { setEditingClass(null); setClassName(''); setClassGrade('Form 1'); setClassStream(''); setClassDescription('') }}>Cancel</button>}
+                <button className="primary-button" disabled={saving}>{saving ? 'Saving?' : editingClass ? 'Save class' : 'Create class'}</button>
+              </div>
+            </form>
+          </div>
+          <section className="card mt-6 p-5">
+            <div className="grid gap-5 lg:grid-cols-[1fr_1.2fr]">
+              <form onSubmit={createTerm} className="space-y-4">
+                <h2 className="font-display text-lg font-bold">Academic terms</h2>
+                <Field label="Academic year"><select className="form-input" value={termYearId} onChange={(event) => setTermYearId(event.target.value)} required><option value="">Select year</option>{years.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
+                <Field label="Term name"><input className="form-input" value={termName} onChange={(event) => setTermName(event.target.value)} maxLength={40} required placeholder="Term 1" /></Field>
+                <div className="grid grid-cols-2 gap-3"><Field label="Starts"><input className="form-input" type="date" value={termStart} onChange={(event) => setTermStart(event.target.value)} /></Field><Field label="Ends"><input className="form-input" type="date" value={termEnd} onChange={(event) => setTermEnd(event.target.value)} /></Field></div>
+                <button className="primary-button" disabled={saving}>Add term</button>
+              </form>
+              <div>
+                <h3 className="font-semibold">Configured terms</h3>
+                {terms.length ? terms.map((term) => <div key={term.id} className="flex items-center justify-between gap-3 border-b border-[#31533d]/8 py-3 text-sm"><span>{term.name} · {years.find((item) => item.id === term.academic_year_id)?.name}</span><span className="text-xs text-[#789083]">{term.starts_on || 'Date TBD'} ? {term.ends_on || 'Date TBD'}</span><button type="button" className="secondary-button" onClick={() => void (async () => { if (!window.confirm(`Remove ${term.name}?`)) return; const { error: removeError } = await supabase.from('academic_terms').delete().eq('id', term.id); if (removeError) setError(removeError.message); else await load() })()}>Remove</button></div>) : <p className="mt-3 text-sm text-[#789083]">No terms configured.</p>}
+              </div>
+            </div>
+          </section>
+        </>
+      )}
 
-      {section === 'Teacher Assignments' && <div className="space-y-5"><form onSubmit={createAssignment} className="card grid gap-4 p-5 md:grid-cols-4"><Field label="Teacher"><select className="form-input" value={teacherId} onChange={(event) => setTeacherId(event.target.value)} required><option value="">Select teacher</option>{teachers.map((item) => <option key={item.id} value={item.id}>{item.full_name || item.username}</option>)}</select></Field><Field label="Subject"><select className="form-input" value={assignmentSubjectId} onChange={(event) => setAssignmentSubjectId(event.target.value)} required><option value="">Select subject</option>{subjects.filter((item) => !item.archived_at).map((item) => <option key={item.id} value={item.id}>{item.name} ({item.code})</option>)}</select></Field><Field label="Class"><select className="form-input" value={assignmentClassId} onChange={(event) => setAssignmentClassId(event.target.value)} required><option value="">Select class</option>{classes.map((item) => <option key={item.id} value={item.id}>{item.name} · {years.find((year) => year.id === item.academic_year_id)?.name}</option>)}</select></Field><div className="flex items-end gap-2"><button className="primary-button w-full" disabled={saving}>{saving ? 'Saving…' : editingAssignment ? 'Save allocation' : 'Assign teacher'}</button>{editingAssignment && <button type="button" className="secondary-button" onClick={() => { setEditingAssignment(null); setTeacherId(''); setAssignmentSubjectId(''); setAssignmentClassId('') }}>Cancel</button>}</div></form><section className="card divide-y divide-[#31533d]/8"><h2 className="font-display p-5 text-lg font-bold">Current teacher assignments</h2>{assignments.map((item) => <article key={item.id} className="flex flex-wrap items-center justify-between gap-3 p-4"><div><p className="font-semibold">{people.find((person) => person.id === item.teacher_id)?.full_name || 'Teacher'} · {subjects.find((subject) => subject.id === item.subject_id)?.name}</p><p className="text-xs text-[#789083]">{classes.find((cls) => cls.id === item.class_id)?.name} · {years.find((year) => year.id === item.academic_year_id)?.name}</p></div><div className="flex gap-2"><button className="secondary-button" type="button" onClick={() => { setEditingAssignment(item.id); setTeacherId(item.teacher_id); setAssignmentSubjectId(item.subject_id); setAssignmentClassId(item.class_id) }}>Edit</button><button className="secondary-button" type="button" onClick={() => void removeRecord('teacher_assignments', item.id, 'Remove this teacher allocation? Existing lessons, submissions, and grades will be retained.')}>Remove</button></div></article>)}{!assignments.length && <p className="p-5 text-sm text-[#789083]">No teacher assignments yet.</p>}</section></div>}
+      {section === 'Teacher Assignments' && <div className="space-y-5"><form onSubmit={createAssignment} className="card grid gap-4 p-5 md:grid-cols-4"><Field label="Teacher"><select className="form-input" value={teacherId} onChange={(event) => setTeacherId(event.target.value)} required><option value="">Select teacher</option>{teachers.map((item) => <option key={item.id} value={item.id}>{item.full_name || item.username}</option>)}</select></Field><Field label="Subject"><select className="form-input" value={assignmentSubjectId} onChange={(event) => setAssignmentSubjectId(event.target.value)} required><option value="">Select subject</option>{subjects.filter((item) => !item.archived_at).map((item) => <option key={item.id} value={item.id}>{item.name} ({item.code})</option>)}</select></Field><Field label="Class"><select className="form-input" value={assignmentClassId} onChange={(event) => setAssignmentClassId(event.target.value)} required><option value="">Select class</option>{classes.map((item) => <option key={item.id} value={item.id}>{academicClassLabel(item)} · {years.find((year) => year.id === item.academic_year_id)?.name}</option>)}</select></Field><div className="flex items-end gap-2"><button className="primary-button w-full" disabled={saving}>{saving ? 'Saving…' : editingAssignment ? 'Save allocation' : 'Assign teacher'}</button>{editingAssignment && <button type="button" className="secondary-button" onClick={() => { setEditingAssignment(null); setTeacherId(''); setAssignmentSubjectId(''); setAssignmentClassId('') }}>Cancel</button>}</div></form><section className="card divide-y divide-[#31533d]/8"><h2 className="font-display p-5 text-lg font-bold">Current teacher assignments</h2>{assignments.map((item) => <article key={item.id} className="flex flex-wrap items-center justify-between gap-3 p-4"><div><p className="font-semibold">{people.find((person) => person.id === item.teacher_id)?.full_name || 'Teacher'} · {subjects.find((subject) => subject.id === item.subject_id)?.name}</p><p className="text-xs text-[#789083]">{academicClassLabel(classes.find((cls) => cls.id === item.class_id) ?? { name: 'Class', grade: '', stream: '' })} · {years.find((year) => year.id === item.academic_year_id)?.name}</p></div><div className="flex gap-2"><button className="secondary-button" type="button" onClick={() => { setEditingAssignment(item.id); setTeacherId(item.teacher_id); setAssignmentSubjectId(item.subject_id); setAssignmentClassId(item.class_id) }}>Edit</button><button className="secondary-button" type="button" onClick={() => void removeRecord('teacher_assignments', item.id, 'Remove this teacher allocation? Existing lessons, submissions, and grades will be retained.')}>Remove</button></div></article>)}{!assignments.length && <p className="p-5 text-sm text-[#789083]">No teacher assignments yet.</p>}</section></div>}
 
-      {section === 'Student Enrolments' && <div className="space-y-5"><form onSubmit={createEnrollment} className="card grid gap-4 p-5 md:grid-cols-3"><Field label="Student"><select className="form-input" value={studentId} onChange={(event) => setStudentId(event.target.value)} required><option value="">Select student</option>{learners.map((item) => <option key={item.id} value={item.id}>{item.full_name || item.username} · {item.username}</option>)}</select></Field><Field label="Class"><select className="form-input" value={enrollmentClassId} onChange={(event) => setEnrollmentClassId(event.target.value)} required><option value="">Select class</option>{classes.map((item) => <option key={item.id} value={item.id}>{item.name} · {years.find((year) => year.id === item.academic_year_id)?.name}</option>)}</select></Field><div className="flex items-end"><button className="primary-button w-full" disabled={saving}>{saving ? 'Saving…' : 'Enroll student'}</button></div></form><section className="card divide-y divide-[#31533d]/8"><h2 className="font-display p-5 text-lg font-bold">Class enrollments</h2>{enrollments.map((item) => <article key={item.id} className="flex items-center justify-between gap-3 p-4"><div><p className="font-semibold">{people.find((person) => person.id === item.student_id)?.full_name || 'Student'} <span className="text-xs font-normal text-[#789083]">{people.find((person) => person.id === item.student_id)?.username}</span></p><p className="text-xs text-[#789083]">{classes.find((cls) => cls.id === item.class_id)?.name}</p></div><button type="button" className="secondary-button" onClick={() => void removeRecord('student_class_enrollments', item.id, 'Remove this class enrollment? Existing marks and submissions will be preserved.')}>Remove enrollment</button></article>)}{!enrollments.length && <p className="p-5 text-sm text-[#789083]">No class enrollments yet.</p>}</section></div>}
+      {section === 'Student Enrolments' && <div className="space-y-5"><form onSubmit={createEnrollment} className="card grid gap-4 p-5 md:grid-cols-3"><Field label="Student"><select className="form-input" value={studentId} onChange={(event) => setStudentId(event.target.value)} required><option value="">Select student</option>{learners.map((item) => <option key={item.id} value={item.id}>{item.full_name || item.username} · {item.username}</option>)}</select></Field><Field label="Class"><select className="form-input" value={enrollmentClassId} onChange={(event) => setEnrollmentClassId(event.target.value)} required><option value="">Select class</option>{classes.map((item) => <option key={item.id} value={item.id}>{academicClassLabel(item)} · {years.find((year) => year.id === item.academic_year_id)?.name}</option>)}</select></Field><div className="flex items-end"><button className="primary-button w-full" disabled={saving}>{saving ? 'Saving…' : 'Enroll student'}</button></div></form><section className="card divide-y divide-[#31533d]/8"><h2 className="font-display p-5 text-lg font-bold">Class enrollments</h2>{enrollments.map((item) => <article key={item.id} className="flex items-center justify-between gap-3 p-4"><div><p className="font-semibold">{people.find((person) => person.id === item.student_id)?.full_name || 'Student'} <span className="text-xs font-normal text-[#789083]">{people.find((person) => person.id === item.student_id)?.username}</span></p><p className="text-xs text-[#789083]">{academicClassLabel(classes.find((cls) => cls.id === item.class_id) ?? { name: 'Class', grade: '', stream: '' })}</p></div><button type="button" className="secondary-button" onClick={() => void removeRecord('student_class_enrollments', item.id, 'Remove this class enrollment? Existing marks and submissions will be preserved.')}>Remove enrollment</button></article>)}{!enrollments.length && <p className="p-5 text-sm text-[#789083]">No class enrollments yet.</p>}</section></div>}
 
       {section === 'Academic Reports' && <div className="space-y-5"><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><StatCard label="Academic years" value={years.length.toLocaleString()} detail="Years configured" icon="calendar" accent /><StatCard label="Classes" value={classes.length.toLocaleString()} detail="Across all years" icon="users" /><StatCard label="Active subjects" value={subjects.filter((item) => !item.archived_at).length.toLocaleString()} detail="Global subjects" icon="book" /><StatCard label="Teacher allocations" value={assignments.length.toLocaleString()} detail="Subject and class assignments" icon="user" /></div><section className="card overflow-hidden"><h2 className="font-display p-5 text-lg font-bold">Legacy records needing review</h2>{issues.length ? issues.map((item) => <div key={item.id} className="flex flex-wrap justify-between gap-2 border-t border-[#31533d]/8 p-4 text-sm"><span>{item.source_table} · {item.source_id}</span><span className="text-[#789083]">{item.reason}</span></div>) : <p className="border-t border-[#31533d]/8 p-5 text-sm text-[#789083]">All records with class and year data were matched.</p>}</section></div>}
       {section === 'Classes & Grades' && <section className="card mt-6 p-5"><div className="grid gap-5 lg:grid-cols-[1fr_1.2fr]"><form onSubmit={createTerm} className="space-y-4"><h2 className="font-display text-lg font-bold">Academic terms</h2><Field label="Academic year"><select className="form-input" value={termYearId} onChange={(event) => setTermYearId(event.target.value)} required><option value="">Select year</option>{years.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field><Field label="Term name"><input className="form-input" value={termName} onChange={(event) => setTermName(event.target.value)} maxLength={40} required placeholder="Term 1" /></Field><div className="grid grid-cols-2 gap-3"><Field label="Starts"><input className="form-input" type="date" value={termStart} onChange={(event) => setTermStart(event.target.value)} /></Field><Field label="Ends"><input className="form-input" type="date" value={termEnd} onChange={(event) => setTermEnd(event.target.value)} /></Field></div><button className="primary-button" disabled={saving}>Add term</button></form><div><h3 className="font-semibold">Configured terms</h3>{terms.length ? terms.map((term) => <div key={term.id} className="flex items-center justify-between gap-3 border-b border-[#31533d]/8 py-3 text-sm"><span>{term.name} · {years.find((item) => item.id === term.academic_year_id)?.name}</span><span className="text-xs text-[#789083]">{term.starts_on || 'Date TBD'} – {term.ends_on || 'Date TBD'}</span><button type="button" className="secondary-button" onClick={() => void (async () => { if (!window.confirm(`Remove ${term.name}?`)) return; const { error: removeError } = await supabase.from('academic_terms').delete().eq('id', term.id); if (removeError) setError(removeError.message); else await load() })()}>Remove</button></div>) : <p className="mt-3 text-sm text-[#789083]">No terms configured.</p>}</div></div></section>}
@@ -1845,10 +1971,10 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
               ))}
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <label className="relative">
+              <label className="relative w-full max-w-64">
                 <span className="sr-only">Search academy accounts</span>
-                <Icon name="search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#789083]" />
-                <input className="form-input min-w-52 pl-9" value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Search users" />
+                <Icon name="search" size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#789083]" />
+                <input className="form-input min-w-0 !pl-10" value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Search users" />
               </label>
               <button type="button" onClick={exportUsers} disabled={!visibleUsers.length} className="secondary-button disabled:opacity-50">
                 <Icon name="file" size={15} /> Export CSV
@@ -2800,13 +2926,13 @@ function ClassroomsPage({
             ? supabase.from('subjects').select('id, name, level, code, archived_at').in('id', subjectIds)
             : Promise.resolve({ data: [], error: null }),
           classIds.length
-            ? supabase.from('classes').select('id, name').in('id', classIds)
+            ? supabase.from('classes').select('id, name, grade, stream').in('id', classIds)
             : Promise.resolve({ data: [], error: null }),
         ])
         if (subjectResult.error) throw subjectResult.error
         if (classResult.error) throw classResult.error
         const subjectById = new Map((subjectResult.data ?? []).map((item) => [item.id, item]))
-        const classById = new Map((classResult.data ?? []).map((item) => [item.id, item.name]))
+        const classById = new Map((classResult.data ?? []).map((item) => [item.id, academicClassLabel(item)]))
         const mappedSubjects = await Promise.all(assignmentRows.map(async (assignment) => {
           const subject = subjectById.get(assignment.subject_id)
           if (!subject || subject.archived_at) return null
