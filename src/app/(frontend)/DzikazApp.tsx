@@ -628,6 +628,13 @@ function ProgressRing({ value, size = 76 }: { value: number; size?: number }) {
   )
 }
 
+function learnerTimeGreeting(date: Date) {
+  const hour = date.getHours()
+  if (hour >= 5 && hour < 12) return 'Good morning'
+  if (hour >= 12 && hour < 17) return 'Good afternoon'
+  return 'Good evening'
+}
+
 function LearnerDashboard({ name, userId, supabase }: { name: string; userId: string; supabase: SupabaseClient }) {
   const [completedLessons, setCompletedLessons] = useState(0)
   const [totalLessons, setTotalLessons] = useState(0)
@@ -635,12 +642,18 @@ function LearnerDashboard({ name, userId, supabase }: { name: string; userId: st
   const [progressSaving, setProgressSaving] = useState(false)
   const [progressError, setProgressError] = useState('')
   const [enrolledSubjects, setEnrolledSubjects] = useState<{ id: string; name: string; level: string; code: string }[]>([])
+  const [learnerClasses, setLearnerClasses] = useState<string[]>([])
+  const [greeting, setGreeting] = useState('Welcome')
   const [marksCount, setMarksCount] = useState(0)
   const [learningTab, setLearningTab] = useState<'overview' | 'subjects' | 'progress'>('overview')
   const [subjectSearch, setSubjectSearch] = useState('')
   const [subjectLevel, setSubjectLevel] = useState('all')
   const [dashboardLoading, setDashboardLoading] = useState(true)
   const [dashboardError, setDashboardError] = useState('')
+
+  useEffect(() => {
+    setGreeting(learnerTimeGreeting(new Date()))
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -650,6 +663,7 @@ function LearnerDashboard({ name, userId, supabase }: { name: string; userId: st
       setDashboardError('')
       setProgressError('')
       setEnrolledSubjects([])
+      setLearnerClasses([])
       setCompletedLessons(0)
       setTotalLessons(0)
       setMarksCount(0)
@@ -664,6 +678,18 @@ function LearnerDashboard({ name, userId, supabase }: { name: string; userId: st
       else if (marks.error) setDashboardError(marks.error.message)
       else {
         const classIds = [...new Set((classEnrollments.data ?? []).map((item) => item.class_id))]
+        const classResult = classIds.length
+          ? await supabase.from('classes').select('id, name, grade, stream').in('id', classIds)
+          : { data: [], error: null }
+        if (!active) return
+        if (classResult.error) setDashboardError(classResult.error.message)
+        else {
+          const classLabels = (classResult.data ?? []).map((item) => {
+            const level = item.grade?.trim() || item.name.trim()
+            return `${level}${item.stream?.trim().toUpperCase() ?? ''}`
+          })
+          setLearnerClasses([...new Set(classLabels)])
+        }
         const classSubjects = classIds.length
           ? await supabase.from('class_subjects').select('subject_id').in('class_id', classIds)
           : { data: [], error: null }
@@ -734,7 +760,7 @@ function LearnerDashboard({ name, userId, supabase }: { name: string; userId: st
   )
 
   return (
-    <DashboardFrame eyebrow="Learner dashboard" title={`Good morning, ${name}`} subtitle="Your learning activity and enrolled subjects, all in one place.">
+    <DashboardFrame eyebrow="Learner dashboard" title={`${greeting}, ${name}`} subtitle={`${learnerClasses.length ? learnerClasses.join(', ') : dashboardLoading ? 'Loading your class…' : 'Your class has not been assigned yet'} · Your learning activity and enrolled subjects, all in one place.`}>
       {dashboardError && <p role="alert" className="mb-5 rounded-lg bg-[#9b7466]/10 p-3 text-sm text-[#8a5548]">Could not load some learning information: {dashboardError}</p>}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <StatCard label="Enrolled subjects" value={dashboardLoading ? '…' : enrolledSubjects.length.toLocaleString()} detail="Current subject enrollments" icon="book" accent />
