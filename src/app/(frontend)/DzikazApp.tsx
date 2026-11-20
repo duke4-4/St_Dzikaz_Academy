@@ -1251,7 +1251,7 @@ function AdminSettingsPage({
           {([
             ['academy', 'Academy'],
             ['access', 'Access & privacy'],
-            ['communication', 'Email'],
+            ['communication', 'Email delivery'],
           ] as const).map(([key, label]) => (
             <button
               key={key}
@@ -1328,15 +1328,15 @@ function AdminSettingsPage({
           ) : (
             <section role="tabpanel" className="card overflow-hidden">
               <div className="border-b border-[#31533d]/10 px-6 py-5">
-                <h2 className="font-display text-lg font-bold text-[#284633]">Account emails</h2>
-                <p className="mt-1 text-sm text-[#789083]">Welcome messages for accounts created by an administrator.</p>
+                <h2 className="font-display text-lg font-bold text-[#284633]">Email delivery paused</h2>
+                <p className="mt-1 text-sm text-[#789083]">Automated academy account emails are disabled until sender-domain setup is complete.</p>
               </div>
               <div className="flex flex-wrap items-center justify-between gap-4 p-6">
                 <div className="flex items-start gap-3">
                   <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#E6D8C3]/55 text-[#5D866C]"><Icon name="mail" /></span>
                   <div>
-                    <p className="text-sm font-semibold text-[#31533d]">Branded sign-in email</p>
-                    <p className="mt-1 max-w-xl text-xs leading-5 text-[#789083]">When server email delivery is configured, new accounts receive their email address, temporary password, and first sign-in instructions in an academy-colour welcome email. Delivery credentials are managed in the app host&apos;s server-side environment settings.</p>
+                    <p className="text-sm font-semibold text-[#31533d]">Account credentials</p>
+                    <p className="mt-1 max-w-xl text-xs leading-5 text-[#789083]">Automated account emails are paused while the academy sender domain is being configured. User Management shows a new account&apos;s temporary password once so you can share it securely. Supabase Auth verification and password-recovery emails are separate.</p>
                   </div>
                 </div>
                 <button type="button" onClick={onManageUsers} className="secondary-button">Create an account</button>
@@ -1554,6 +1554,7 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
   const [userSearch, setUserSearch] = useState('')
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [createdCredential, setCreatedCredential] = useState<{ email: string; temporaryPassword: string } | null>(null)
   const [saving, setSaving] = useState(false)
 
   const loadUsers = useCallback(async (page = 1, append = false) => {
@@ -1609,6 +1610,7 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
     event.preventDefault()
     setError('')
     setMessage('')
+    setCreatedCredential(null)
 
     const { data: { session }, error: sessionError } = await supabase.auth.getSession()
     if (sessionError) {
@@ -1646,10 +1648,11 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
         typeof result === 'object' && result !== null
           ? (result as Record<string, unknown>)
           : {}
-      if (responseBody.emailSent !== true) {
-        throw new Error('The account was created, but its welcome email was not confirmed.')
+      if (typeof responseBody.temporaryPassword !== 'string') {
+        throw new Error('The account may have been created, but its temporary password was not returned. Check the account list before retrying.')
       }
-      setMessage(`Account created for ${email.trim()}. A branded sign-in email with a temporary password was sent.`)
+      setCreatedCredential({ email: typeof responseBody.email === 'string' ? responseBody.email : email.trim(), temporaryPassword: responseBody.temporaryPassword })
+      setMessage(`Account created for ${email.trim()}. No email was sent; share the temporary password securely.`)
       setFullName('')
       setEmail('')
       setRole('learner')
@@ -1660,6 +1663,17 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
       )
     } finally {
       setSaving(false)
+    }
+  }
+
+  const copyTemporaryPassword = async () => {
+    if (!createdCredential) return
+    try {
+      await navigator.clipboard.writeText(createdCredential.temporaryPassword)
+      setError('')
+      setMessage('Temporary password copied. Share it securely; no email was sent.')
+    } catch {
+      setError('Clipboard access failed. Select the password above and copy it manually.')
     }
   }
 
@@ -1736,9 +1750,10 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
     <DashboardFrame
       eyebrow="Admin dashboard"
       title="User management"
-      subtitle="Create a learner, instructor, or administrator account."
+      subtitle="Create a learner, instructor, or administrator account. Automated email is paused."
     >
       <form onSubmit={addUser} className="card max-w-2xl space-y-5 p-6">
+        <p className="rounded-lg bg-[#E6D8C3]/35 p-3 text-xs leading-5 text-[#52665a]">No email will be sent. After creating an account, copy its temporary password from the one-time confirmation and share it securely with the user.</p>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Full name">
             <input
@@ -1784,6 +1799,7 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
         {message && (
           <div role="status" className="rounded-lg bg-[#5D866C]/10 p-3 text-xs text-[#31533d]">
             <p>{message}</p>
+            {createdCredential && <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-[#5D866C]/20 bg-white p-3"><div className="min-w-0 flex-1"><p className="font-semibold">Temporary password for {createdCredential.email}</p><code className="mt-1 block select-all break-all font-mono">{createdCredential.temporaryPassword}</code></div><button type="button" className="secondary-button" onClick={() => void copyTemporaryPassword()}>Copy password</button></div>}
           </div>
         )}
         <button disabled={saving} className="primary-button disabled:opacity-60">

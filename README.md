@@ -89,7 +89,7 @@ Use the `admin` role only for trusted academy administrators. The app does not l
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `NEXT_PUBLIC_SITE_URL` (the production app URL, recommended for canonical metadata)
 - `SUPABASE_SERVICE_ROLE_KEY` (server-only; required for admins to create accounts from User management)
-- `RESEND_API_KEY` (server-only; sends temporary-password emails)
-- `RESEND_FROM_EMAIL` (verified sender address configured in Resend)
 
 Apply Supabase migrations before using the deployed app. Never add secret keys under a `NEXT_PUBLIC_*` name or commit them. The private student workbook and generated credential report are excluded from deployment.
+
+Automated account emails are currently paused. Admin-created accounts show a temporary password once in User Management for secure manual delivery. Supabase Auth verification and password-recovery emails remain configured separately in Supabase.
