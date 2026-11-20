@@ -31,6 +31,8 @@ The migration creates the Auth profile trigger and role-based RLS policies. `sup
 
 If learner signup reports “Database error saving new user,” apply `supabase/migrations/202611180002_repair_auth_profile_signup.sql` to the connected Supabase project. For a project where the original schema is already installed, run this new repair migration in the Supabase Dashboard SQL Editor; do not rerun the original schema file. The repair updates the Auth trigger to generate the required unique profile username.
 
+If learner signup fails because `student_details.registration_number` is null, apply `supabase/migrations/202611180003_allow_optional_registration_number.sql` to the connected Supabase project. It aligns older databases with the current schema, where registration numbers are optional for email signups, and preserves existing registration numbers.
+
 Admins and other existing users sign in with their email address. The academy dashboard is also available at `/admin/` (including its trailing slash).
 Gmail addresses are supported for email/password sign-in and signup. In Supabase Auth, keep the email provider enabled and configure the app's site URL and redirect allowlist for both the site root and `/admin/`.
 
