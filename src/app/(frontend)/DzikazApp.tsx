@@ -577,12 +577,73 @@ function ProgressRing({ value, size = 76 }: { value: number; size?: number }) {
   )
 }
 
-function LearnerDashboard() {
-  const [continued, setContinued] = useState(false)
+const featuredCourseKey = 'data-analyst-python'
+const featuredCourseLessons = 9
+
+function LearnerDashboard({
+  name,
+  userId,
+  supabase,
+}: {
+  name: string
+  userId: string
+  supabase: SupabaseClient
+}) {
+  const [completedLessons, setCompletedLessons] = useState(0)
+  const [progressLoading, setProgressLoading] = useState(true)
+  const [progressSaving, setProgressSaving] = useState(false)
+  const [progressError, setProgressError] = useState('')
+
+  useEffect(() => {
+    let active = true
+    const loadProgress = async () => {
+      const { data, error } = await supabase
+        .from('learning_progress')
+        .select('completed_lessons')
+        .eq('profile_id', userId)
+        .eq('course_key', featuredCourseKey)
+        .maybeSingle()
+
+      if (!active) return
+      if (error) {
+        setProgressError(`Could not load lesson progress: ${error.message}`)
+      } else if (data) {
+        setCompletedLessons(data.completed_lessons)
+      }
+      setProgressLoading(false)
+    }
+    void loadProgress()
+    return () => {
+      active = false
+    }
+  }, [supabase, userId])
+
+  const completeNextLesson = async () => {
+    if (progressSaving || completedLessons >= featuredCourseLessons) return
+    const nextCompletedLessons = completedLessons + 1
+    setProgressSaving(true)
+    setProgressError('')
+    const { error } = await supabase.from('learning_progress').upsert(
+      {
+        profile_id: userId,
+        course_key: featuredCourseKey,
+        completed_lessons: nextCompletedLessons,
+      },
+      { onConflict: 'profile_id,course_key' },
+    )
+    if (error) {
+      setProgressError(`Could not save lesson progress: ${error.message}`)
+    } else {
+      setCompletedLessons(nextCompletedLessons)
+    }
+    setProgressSaving(false)
+  }
+
+  const courseProgress = Math.round((completedLessons / featuredCourseLessons) * 100)
   return (
     <DashboardFrame
       eyebrow="Learner dashboard"
-      title="Good morning, Amara"
+      title={`Good morning, ${name}`}
       subtitle="Your next learning milestone is closer than you think."
     >
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -619,23 +680,37 @@ function LearnerDashboard() {
               <div className="p-5 md:p-6">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <p className="text-xs font-bold text-[#5D866C]">Chapter 4 of 9</p>
+                    <p className="text-xs font-bold text-[#5D866C]">
+                      {completedLessons >= featuredCourseLessons
+                        ? 'All lessons complete'
+                        : `Lesson ${completedLessons + 1} of ${featuredCourseLessons}`}
+                    </p>
                     <h3 className="font-display mt-1 text-xl font-bold text-[#284633]">
                       Transforming DataFrames
                     </h3>
                   </div>
-                  <ProgressRing value={continued ? 72 : 64} size={70} />
+                  <ProgressRing value={courseProgress} size={70} />
                 </div>
                 <p className="mt-3 max-w-xl text-sm leading-6 text-[#708277]">
                   Practice filtering, sorting, and grouping real-world datasets with pandas.
                 </p>
                 <button
-                  onClick={() => setContinued(true)}
-                  className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#5D866C] px-5 py-3 text-xs font-bold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-[#4d765c]"
+                  onClick={() => void completeNextLesson()}
+                  disabled={progressLoading || progressSaving || completedLessons >= featuredCourseLessons}
+                  className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#5D866C] px-5 py-3 text-xs font-bold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-[#4d765c] disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <Icon name={continued ? 'check' : 'play'} size={16} />
-                  {continued ? 'Lesson opened' : 'Continue course'}
+                  <Icon name={completedLessons >= featuredCourseLessons ? 'check' : 'play'} size={16} />
+                  {progressLoading
+                    ? 'Loading progress…'
+                    : progressSaving
+                      ? 'Saving…'
+                      : completedLessons >= featuredCourseLessons
+                        ? 'Course complete'
+                        : completedLessons === 0
+                          ? 'Mark first lesson complete'
+                          : 'Mark next lesson complete'}
                 </button>
+                {progressError && <p role="alert" className="mt-3 text-xs text-[#8a5548]">{progressError}</p>}
               </div>
             </div>
           </div>
@@ -3917,7 +3992,6 @@ export default function App() {
     }
     try {
       const data = JSON.parse(stored)
-      if (data.profiles) setProfiles(data.profiles)
       if (data.notices) setNotices(data.notices)
       if (data.subjects) setSubjects(data.subjects)
     } catch {
@@ -3930,9 +4004,9 @@ export default function App() {
     if (!hydrated) return
     window.localStorage.setItem(
       'dzikaz-demo',
-      JSON.stringify({ profiles, notices, subjects }),
+      JSON.stringify({ notices, subjects }),
     )
-  }, [profiles, notices, subjects, hydrated])
+  }, [notices, subjects, hydrated])
 
   const logout = async () => {
     if (!supabase) return
@@ -3992,7 +4066,11 @@ export default function App() {
       return <SubjectsPage subjects={subjects} setSubjects={setSubjects} userId={authUser.id} supabase={supabase} />
     if (active !== 'Overview') return <PlaceholderPage role={role} active={active} />
     return role === 'Learner' ? (
-      <LearnerDashboard />
+      <LearnerDashboard
+        name={profiles.Learner.name}
+        userId={authUser.id}
+        supabase={supabase}
+      />
     ) : role === 'Instructor' ? (
       <InstructorDashboard />
     ) : (

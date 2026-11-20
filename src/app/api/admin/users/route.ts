@@ -22,8 +22,16 @@ async function authorizeAdmin(request: Request) {
   const supabaseURL = process.env.NEXT_PUBLIC_SUPABASE_URL
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!supabaseURL || !anonKey || !serviceRoleKey) {
+  if (!supabaseURL || !anonKey) {
     return { response: jsonError('User management is not configured on the server.', 503) } as const
+  }
+  if (!serviceRoleKey) {
+    return {
+      response: jsonError(
+        'Admin user management needs the server-only SUPABASE_SERVICE_ROLE_KEY setting. Add it to the app host environment and redeploy.',
+        503,
+      ),
+    } as const
   }
 
   const userClient = createClient(supabaseURL, anonKey, {

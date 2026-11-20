@@ -24,6 +24,7 @@ The browser only uses the Supabase URL and publishable anon key. Never expose a 
 | `events` | Scheduled events, audience, and venue. |
 | `notices` | Announcements and audience. |
 | `marks` | Student assessment scores, maximum score, date, feedback, subject, and recording instructor. |
+| `learning_progress` | Per-learner completed lesson count for the featured course, protected by row-level security. |
 | `conversations` | Private learner/instructor conversation scoped to an enrolled subject. |
 | `messages` | Messages and read status within a conversation. |
 
@@ -37,6 +38,8 @@ Admins and other existing users sign in with their email address. The academy da
 Gmail addresses are supported for email/password sign-in and signup. In Supabase Auth, keep the email provider enabled and configure the app's site URL and redirect allowlist for both the site root and `/admin/`.
 
 The classroom workflow is in `supabase/migrations/202611180001_classroom_workflows.sql`. Apply it with `supabase db push` before using classroom pages. It adds subject archiving, student enrollment by registration number, classroom documents, assignments and submissions, attendance, and the private `classroom-files` Storage bucket. Classroom and submitted files are limited to PDF/DOC/DOCX and 10 MB. Archived subjects keep their records and are read-only.
+
+Lesson progress is stored in `supabase/migrations/202611200001_learning_progress.sql`. Apply it with `supabase db push` so the learner dashboard can save and restore each student's completed lesson count.
 
 ## Import student accounts
 
