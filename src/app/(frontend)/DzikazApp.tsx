@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import Image from 'next/image'
 import type { SupabaseClient, User } from '@supabase/supabase-js'
 import { getSupabaseBrowserClient } from '@/lib/supabase'
@@ -272,6 +272,7 @@ type ManagedUser = {
   id: string
   name: string
   email: string
+  registrationNumber: string
   role: 'learner' | 'instructor' | 'admin'
 }
 
@@ -282,6 +283,7 @@ function isManagedUser(value: unknown): value is ManagedUser {
     typeof user.id === 'string' &&
     typeof user.name === 'string' &&
     typeof user.email === 'string' &&
+    typeof user.registrationNumber === 'string' &&
     (user.role === 'learner' || user.role === 'instructor' || user.role === 'admin')
   )
 }
@@ -1660,7 +1662,6 @@ function AdminAcademicPage({ supabase, section }: { supabase: SupabaseClient; se
       {section === 'Student Enrolments' && <div className="space-y-5"><form onSubmit={createEnrollment} className="card grid gap-4 p-5 md:grid-cols-3"><Field label="Student"><select className="form-input" value={studentId} onChange={(event) => setStudentId(event.target.value)} required><option value="">Select student</option>{learners.map((item) => <option key={item.id} value={item.id}>{item.full_name || item.username} · {item.username}</option>)}</select></Field><Field label="Class"><select className="form-input" value={enrollmentClassId} onChange={(event) => setEnrollmentClassId(event.target.value)} required><option value="">Select class</option>{classes.map((item) => <option key={item.id} value={item.id}>{academicClassLabel(item)} · {years.find((year) => year.id === item.academic_year_id)?.name}</option>)}</select></Field><div className="flex items-end"><button className="primary-button w-full" disabled={saving}>{saving ? 'Saving…' : 'Enroll student'}</button></div></form><section className="card divide-y divide-[#31533d]/8"><h2 className="font-display p-5 text-lg font-bold">Class enrollments</h2>{enrollments.map((item) => <article key={item.id} className="flex items-center justify-between gap-3 p-4"><div><p className="font-semibold">{people.find((person) => person.id === item.student_id)?.full_name || 'Student'} <span className="text-xs font-normal text-[#789083]">{people.find((person) => person.id === item.student_id)?.username}</span></p><p className="text-xs text-[#789083]">{academicClassLabel(classes.find((cls) => cls.id === item.class_id) ?? { name: 'Class', grade: '', stream: '' })}</p></div><button type="button" className="secondary-button" onClick={() => void removeRecord('student_class_enrollments', item.id, 'Remove this class enrollment? Existing marks and submissions will be preserved.')}>Remove enrollment</button></article>)}{!enrollments.length && <p className="p-5 text-sm text-[#789083]">No class enrollments yet.</p>}</section></div>}
 
       {section === 'Academic Reports' && <div className="space-y-5"><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><StatCard label="Academic years" value={years.length.toLocaleString()} detail="Years configured" icon="calendar" accent /><StatCard label="Classes" value={classes.length.toLocaleString()} detail="Across all years" icon="users" /><StatCard label="Active subjects" value={subjects.filter((item) => !item.archived_at).length.toLocaleString()} detail="Global subjects" icon="book" /><StatCard label="Teacher allocations" value={assignments.length.toLocaleString()} detail="Subject and class assignments" icon="user" /></div><section className="card overflow-hidden"><h2 className="font-display p-5 text-lg font-bold">Legacy records needing review</h2>{issues.length ? issues.map((item) => <div key={item.id} className="flex flex-wrap justify-between gap-2 border-t border-[#31533d]/8 p-4 text-sm"><span>{item.source_table} · {item.source_id}</span><span className="text-[#789083]">{item.reason}</span></div>) : <p className="border-t border-[#31533d]/8 p-5 text-sm text-[#789083]">All records with class and year data were matched.</p>}</section></div>}
-      {section === 'Classes & Grades' && <section className="card mt-6 p-5"><div className="grid gap-5 lg:grid-cols-[1fr_1.2fr]"><form onSubmit={createTerm} className="space-y-4"><h2 className="font-display text-lg font-bold">Academic terms</h2><Field label="Academic year"><select className="form-input" value={termYearId} onChange={(event) => setTermYearId(event.target.value)} required><option value="">Select year</option>{years.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field><Field label="Term name"><input className="form-input" value={termName} onChange={(event) => setTermName(event.target.value)} maxLength={40} required placeholder="Term 1" /></Field><div className="grid grid-cols-2 gap-3"><Field label="Starts"><input className="form-input" type="date" value={termStart} onChange={(event) => setTermStart(event.target.value)} /></Field><Field label="Ends"><input className="form-input" type="date" value={termEnd} onChange={(event) => setTermEnd(event.target.value)} /></Field></div><button className="primary-button" disabled={saving}>Add term</button></form><div><h3 className="font-semibold">Configured terms</h3>{terms.length ? terms.map((term) => <div key={term.id} className="flex items-center justify-between gap-3 border-b border-[#31533d]/8 py-3 text-sm"><span>{term.name} · {years.find((item) => item.id === term.academic_year_id)?.name}</span><span className="text-xs text-[#789083]">{term.starts_on || 'Date TBD'} – {term.ends_on || 'Date TBD'}</span><button type="button" className="secondary-button" onClick={() => void (async () => { if (!window.confirm(`Remove ${term.name}?`)) return; const { error: removeError } = await supabase.from('academic_terms').delete().eq('id', term.id); if (removeError) setError(removeError.message); else await load() })()}>Remove</button></div>) : <p className="mt-3 text-sm text-[#789083]">No terms configured.</p>}</div></div></section>}
     </>}
   </DashboardFrame>
 }
@@ -1675,12 +1676,13 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
   const [removingUserId, setRemovingUserId] = useState('')
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
+  const [registrationNumber, setRegistrationNumber] = useState('')
   const [role, setRole] = useState<'learner' | 'instructor' | 'admin'>('learner')
   const [userTab, setUserTab] = useState<'all' | ManagedUser['role']>('all')
   const [userSearch, setUserSearch] = useState('')
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
-  const [createdCredential, setCreatedCredential] = useState<{ email: string; temporaryPassword: string } | null>(null)
+  const [createdCredential, setCreatedCredential] = useState<{ loginIdentifier: string; temporaryPassword: string; isLearner: boolean } | null>(null)
   const [saving, setSaving] = useState(false)
 
   const loadUsers = useCallback(async (page = 1, append = false) => {
@@ -1756,7 +1758,7 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
           Authorization: `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ fullName, email, role }),
+        body: JSON.stringify({ fullName, email: role === 'learner' ? '' : email, registrationNumber: role === 'learner' ? registrationNumber : '', role }),
       })
       const result: unknown = await response.json()
       if (!response.ok) {
@@ -1777,10 +1779,15 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
       if (typeof responseBody.temporaryPassword !== 'string') {
         throw new Error('The account may have been created, but its temporary password was not returned. Check the account list before retrying.')
       }
-      setCreatedCredential({ email: typeof responseBody.email === 'string' ? responseBody.email : email.trim(), temporaryPassword: responseBody.temporaryPassword })
-      setMessage(`Account created for ${email.trim()}. No email was sent; share the temporary password securely.`)
+      const loginIdentifier = typeof responseBody.loginIdentifier === 'string'
+        ? responseBody.loginIdentifier
+        : email.trim()
+      const isLearner = role === 'learner'
+      setCreatedCredential({ loginIdentifier, temporaryPassword: responseBody.temporaryPassword, isLearner })
+      setMessage(`Account created for ${loginIdentifier}. No email was sent; share the temporary password securely.`)
       setFullName('')
       setEmail('')
+      setRegistrationNumber('')
       setRole('learner')
       await loadUsers()
     } catch (requestError) {
@@ -1804,9 +1811,12 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
   }
 
   const removeUser = async (user: ManagedUser) => {
+    const accountIdentifier = user.registrationNumber
+      ? `registration number ${user.registrationNumber}`
+      : user.email
     if (
       !window.confirm(
-        `Permanently remove ${user.name} (${user.email})? Linked profile data and learner records may also be deleted. Staff accounts with assigned records may need those records reassigned first.`,
+        `Permanently remove ${user.name} (${accountIdentifier})? Linked profile data and learner records may also be deleted. Staff accounts with assigned records may need those records reassigned first.`,
       )
     ) return
 
@@ -1850,15 +1860,15 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
   const visibleUsers = users.filter((user) => {
     const matchesRole = userTab === 'all' || user.role === userTab
     const query = userSearch.trim().toLowerCase()
-    const matchesSearch = `${user.name} ${user.email} ${user.role}`.toLowerCase().includes(query)
+    const matchesSearch = `${user.name} ${user.email} ${user.registrationNumber} ${user.role}`.toLowerCase().includes(query)
     return matchesRole && matchesSearch
   })
 
   const exportUsers = () => {
     const csvCell = (value: string) => `"${value.replaceAll('"', '""')}"`
     const rows = [
-      ['Name', 'Email', 'Role'],
-      ...visibleUsers.map((user) => [user.name, user.email, user.role]),
+      ['Name', 'Email', 'Registration number', 'Role'],
+      ...visibleUsers.map((user) => [user.name, user.email, user.registrationNumber, user.role]),
     ]
     const blobUrl = URL.createObjectURL(
       new Blob([rows.map((row) => row.map(csvCell).join(',')).join('\r\n')], {
@@ -1876,10 +1886,10 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
     <DashboardFrame
       eyebrow="Admin dashboard"
       title="User management"
-      subtitle="Create a learner, instructor, or administrator account. Automated email is paused."
+      subtitle="Create learner accounts with registration numbers, and staff accounts with email addresses. Automated email is paused."
     >
       <form onSubmit={addUser} className="card max-w-2xl space-y-5 p-6">
-        <p className="rounded-lg bg-[#E6D8C3]/35 p-3 text-xs leading-5 text-[#52665a]">No email will be sent. After creating an account, copy its temporary password from the one-time confirmation and share it securely with the user.</p>
+        <p className="rounded-lg bg-[#E6D8C3]/35 p-3 text-xs leading-5 text-[#52665a]">No email will be sent. Learners sign in with their registration number; teachers and admins sign in with email. Copy and share each temporary password securely.</p>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Full name">
             <input
@@ -1891,18 +1901,33 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
               required
             />
           </Field>
-          <Field label="Email address">
-            <input
-              className="form-input"
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              maxLength={254}
-              required
-              placeholder="name@gmail.com"
-            />
-          </Field>
+          {role === 'learner' ? (
+            <Field label="Registration number">
+              <input
+                className="form-input"
+                autoComplete="off"
+                value={registrationNumber}
+                onChange={(event) => setRegistrationNumber(event.target.value)}
+                maxLength={40}
+                required
+                placeholder="e.g. 2026-001"
+              />
+              <p className="mt-1 text-[11px] text-[#789083]">Letters and numbers are used for sign-in; spaces and punctuation are ignored.</p>
+            </Field>
+          ) : (
+            <Field label="Email address">
+              <input
+                className="form-input"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                maxLength={254}
+                required
+                placeholder="name@gmail.com"
+              />
+            </Field>
+          )}
           <Field label="Academy role">
             <select
               className="form-input"
@@ -1925,7 +1950,7 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
         {message && (
           <div role="status" className="rounded-lg bg-[#5D866C]/10 p-3 text-xs text-[#31533d]">
             <p>{message}</p>
-            {createdCredential && <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-[#5D866C]/20 bg-white p-3"><div className="min-w-0 flex-1"><p className="font-semibold">Temporary password for {createdCredential.email}</p><code className="mt-1 block select-all break-all font-mono">{createdCredential.temporaryPassword}</code></div><button type="button" className="secondary-button" onClick={() => void copyTemporaryPassword()}>Copy password</button></div>}
+            {createdCredential && <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-[#5D866C]/20 bg-white p-3"><div className="min-w-0 flex-1"><p className="font-semibold">Sign-in {createdCredential.isLearner ? 'registration number' : 'email'}: {createdCredential.loginIdentifier}</p><p className="mt-1 text-xs text-[#789083]">Temporary password</p><code className="block select-all break-all font-mono">{createdCredential.temporaryPassword}</code></div><button type="button" className="secondary-button" onClick={() => void copyTemporaryPassword()}>Copy password</button></div>}
           </div>
         )}
         <button disabled={saving} className="primary-button disabled:opacity-60">
@@ -2003,7 +2028,7 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
                   <p className="truncate text-sm font-bold text-[#284633]">
                     {user.name}{user.id === currentUserId ? ' (you)' : ''}
                   </p>
-                  <p className="truncate text-xs text-[#789083]">{user.email}</p>
+                  <p className="truncate text-xs text-[#789083]">{user.email || (user.registrationNumber ? `Registration number: ${user.registrationNumber}` : 'No email address')}</p>
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="rounded-full bg-[#F5F5F0] px-3 py-1 text-[10px] font-bold capitalize text-[#5D866C]">
@@ -4157,11 +4182,11 @@ const loginRoles: { value: LoginRole; label: string }[] = [
 function LoginPage({
   supabase,
   academyName,
-  onRoleChange,
+  onSignInAttempt,
 }: {
   supabase: SupabaseClient | null
   academyName: string
-  onRoleChange: (role: LoginRole) => void
+  onSignInAttempt: () => void
 }) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [loginRole, setLoginRole] = useState<LoginRole>('learner')
@@ -4200,7 +4225,7 @@ function LoginPage({
         setMessage('Account created. Check your email to confirm your address, then sign in.')
         setMode('signin')
       } else {
-        onRoleChange(loginRole)
+        onSignInAttempt()
         const identifier = email.trim()
         const authEmail =
           loginRole === 'learner' && !identifier.includes('@')
@@ -4268,7 +4293,7 @@ function LoginPage({
                     aria-controls="login-panel"
                     onClick={() => {
                       setLoginRole(item.value)
-                      onRoleChange(item.value)
+                      onSignInAttempt()
                       setError('')
                       setMessage('')
                     }}
@@ -4389,7 +4414,7 @@ function LoginPage({
                   setMode(nextMode)
                   if (nextMode === 'signup') {
                     setLoginRole('learner')
-                    onRoleChange('learner')
+                    onSignInAttempt()
                   }
                   setError('')
                   setMessage('')
@@ -4636,7 +4661,6 @@ export default function App() {
   const [profileReady, setProfileReady] = useState(false)
   const [requiresPasswordChange, setRequiresPasswordChange] = useState(false)
   const [authError, setAuthError] = useState('')
-  const expectedLoginRole = useRef<LoginRole | null>(null)
   const [role, setRole] = useState<Role>('Learner')
   const [active, setActive] = useState('Overview')
   const [profileOpen, setProfileOpen] = useState(false)
@@ -4701,7 +4725,7 @@ export default function App() {
     const loadProfile = async () => {
       const { data, error } = await supabase
         .from('profiles')
-        .select('username, full_name, bio, avatar_url, role, school, phone, requires_password_change')
+        .select('username, full_name, role, school, phone, requires_password_change')
         .eq('id', authUser.id)
         .single()
 
@@ -4714,6 +4738,13 @@ export default function App() {
         return
       }
 
+      const { data: profileExtras } = await supabase
+        .from('profiles')
+        .select('bio, avatar_url')
+        .eq('id', authUser.id)
+        .maybeSingle()
+      if (!active) return
+
       const roleByDatabaseValue: Record<string, Role> = {
         learner: 'Learner',
         instructor: 'Instructor',
@@ -4724,23 +4755,6 @@ export default function App() {
         setAuthError('Your account has an unsupported academy role. Contact an administrator.')
         const { error: signOutError } = await supabase.auth.signOut()
         if (signOutError) setAuthError(`Unsupported academy role. Sign-out failed: ${signOutError.message}`)
-        setProfileReady(true)
-        return
-      }
-
-      const expectedRole = expectedLoginRole.current
-      const loginRoleByDashboardRole: Record<Role, LoginRole> = {
-        Learner: 'learner',
-        Instructor: 'instructor',
-        Admin: 'admin',
-      }
-      const nextRoleValue = loginRoleByDashboardRole[nextRole]
-      if (expectedRole && nextRoleValue !== expectedRole) {
-        const roleName = loginRoles.find((item) => item.value === expectedRole)?.label
-        setAuthError(`This account is not registered as a ${roleName?.toLowerCase() ?? 'matching'} account.`)
-        const { error: signOutError } = await supabase.auth.signOut()
-        if (signOutError) setAuthError(`Account type does not match. Sign-out failed: ${signOutError.message}`)
-        setAuthUser(null)
         setProfileReady(true)
         return
       }
@@ -4770,8 +4784,8 @@ export default function App() {
           ...current[nextRole],
           name: data.full_name || data.username,
           username: data.username,
-          bio: data.bio ?? '',
-          image: data.avatar_url || undefined,
+          bio: profileExtras?.bio ?? '',
+          image: profileExtras?.avatar_url || undefined,
           avatarFile: undefined,
           email: authUser.email?.endsWith('@login.dzikaz.ac.zw')
             ? 'Registration number and password'
@@ -4836,10 +4850,7 @@ export default function App() {
         <LoginPage
           supabase={supabase}
           academyName={organizationName}
-          onRoleChange={(nextRole) => {
-            expectedLoginRole.current = nextRole
-            setAuthError('')
-          }}
+          onSignInAttempt={() => setAuthError('')}
         />
       </>
     )

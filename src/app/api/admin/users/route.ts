@@ -86,13 +86,27 @@ export async function GET(request: Request) {
   if (profilesError) return jsonError('Could not load academy user profiles.', 500)
 
   const profileById = new Map((profiles ?? []).map((profile) => [profile.id, profile]))
+  const { data: studentDetails, error: studentDetailsError } = userIds.length
+    ? await authorization.context.adminClient
+        .from('student_details')
+        .select('profile_id, registration_number')
+        .in('profile_id', userIds)
+    : { data: [], error: null }
+  if (studentDetailsError) return jsonError('Could not load learner registration numbers.', 500)
+  const registrationByProfileId = new Map(
+    (studentDetails ?? []).map((details) => [details.profile_id, details.registration_number ?? '']),
+  )
+
   const users = data.users.flatMap((user) => {
     const profile = profileById.get(user.id)
     if (!profile || !isAcademyRole(profile.role)) return []
+    const registrationNumber = registrationByProfileId.get(user.id) ?? ''
+    const isRegistrationLogin = user.email?.endsWith('@login.dzikaz.ac.zw') === true
     return [{
       id: user.id,
       name: profile.full_name || profile.username,
-      email: user.email ?? '',
+      email: isRegistrationLogin ? '' : user.email ?? '',
+      registrationNumber,
       role: profile.role,
     }]
   })
@@ -120,19 +134,36 @@ export async function POST(request: Request) {
   const values = body as Record<string, unknown>
   const fullName = typeof values.fullName === 'string' ? values.fullName.trim() : ''
   const email = typeof values.email === 'string' ? values.email.trim().toLowerCase() : ''
+  const registrationInput = typeof values.registrationNumber === 'string' ? values.registrationNumber.trim() : ''
   const role = values.role
 
   if (!fullName || fullName.length > 120) {
     return jsonError('Enter a name between 1 and 120 characters.', 400)
   }
-  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return jsonError('Enter a valid email address.', 400)
-  }
   if (!isAcademyRole(role)) return jsonError('Choose a valid academy role.', 400)
+
+  let accountEmail = email
+  let registrationNumber = ''
+  if (role === 'learner') {
+    registrationNumber = registrationInput.toLowerCase().replace(/[^a-z0-9]/g, '')
+    if (registrationInput.length > 40 || !/^[a-z0-9]{3,30}$/.test(registrationNumber)) {
+      return jsonError('Enter a registration number with 3 to 30 letters or numbers.', 400)
+    }
+    accountEmail = `student+${registrationNumber}@login.dzikaz.ac.zw`
+    const { data: existingRegistration, error: registrationError } = await authorization.context.adminClient
+      .from('student_details')
+      .select('profile_id')
+      .eq('registration_number', registrationNumber)
+      .maybeSingle()
+    if (registrationError) return jsonError('Could not verify that registration number.', 500)
+    if (existingRegistration) return jsonError('A learner with that registration number already exists.', 409)
+  } else if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return jsonError('Enter a valid email address for staff accounts.', 400)
+  }
 
   const temporaryPassword = randomBytes(24).toString('base64url')
   const { data, error } = await authorization.context.adminClient.auth.admin.createUser({
-    email,
+    email: accountEmail,
     password: temporaryPassword,
     email_confirm: true,
     user_metadata: { full_name: fullName, requires_password_change: true },
@@ -140,8 +171,34 @@ export async function POST(request: Request) {
   })
   if (error) return jsonError(error.message, 400)
 
+  if (role === 'learner') {
+    const { data: learnerDetails, error: registrationSaveError } = await authorization.context.adminClient
+      .from('student_details')
+      .update({ registration_number: registrationNumber })
+      .eq('profile_id', data.user.id)
+      .select('profile_id')
+      .maybeSingle()
+    if (registrationSaveError || !learnerDetails) {
+      const { error: rollbackError } = await authorization.context.adminClient.auth.admin.deleteUser(data.user.id)
+      const detail = registrationSaveError?.message ?? 'The learner profile was not created.'
+      return jsonError(
+        rollbackError
+          ? `Could not save the registration number (${detail}), and the new account could not be rolled back. Remove account ${data.user.id} manually.`
+          : `Could not save the registration number: ${detail}`,
+        500,
+      )
+    }
+  }
+
   return NextResponse.json(
-    { id: data.user.id, email: data.user.email, role, temporaryPassword },
+    {
+      id: data.user.id,
+      email: role === 'learner' ? '' : data.user.email,
+      loginIdentifier: role === 'learner' ? registrationNumber : data.user.email,
+      registrationNumber: role === 'learner' ? registrationNumber : '',
+      role,
+      temporaryPassword,
+    },
     { status: 201 },
   )
 }
