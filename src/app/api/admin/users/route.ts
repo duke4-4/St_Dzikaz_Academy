@@ -134,6 +134,8 @@ export async function POST(request: Request) {
   const values = body as Record<string, unknown>
   const fullName = typeof values.fullName === 'string' ? values.fullName.trim() : ''
   const email = typeof values.email === 'string' ? values.email.trim().toLowerCase() : ''
+  const school = typeof values.school === 'string' ? values.school.trim() : ''
+  const phone = typeof values.phone === 'string' ? values.phone.trim() : ''
   const registrationInput = typeof values.registrationNumber === 'string' ? values.registrationNumber.trim() : ''
   const role = values.role
 
@@ -141,6 +143,11 @@ export async function POST(request: Request) {
     return jsonError('Enter a name between 1 and 120 characters.', 400)
   }
   if (!isAcademyRole(role)) return jsonError('Choose a valid academy role.', 400)
+  if (school.length > 120) return jsonError('School or organisation name must be 120 characters or fewer.', 400)
+  if (phone.length > 40) return jsonError('Phone number must be 40 characters or fewer.', 400)
+  if (role !== 'admin' && (!school || !phone)) {
+    return jsonError('Enter a school or organisation and phone number for learner and teacher accounts.', 400)
+  }
 
   let accountEmail = email
   let registrationNumber = ''
@@ -171,10 +178,24 @@ export async function POST(request: Request) {
   })
   if (error) return jsonError(error.message, 400)
 
+  const { error: profileSaveError } = await authorization.context.adminClient
+    .from('profiles')
+    .update({ school, phone })
+    .eq('id', data.user.id)
+  if (profileSaveError) {
+    const { error: rollbackError } = await authorization.context.adminClient.auth.admin.deleteUser(data.user.id)
+    return jsonError(
+      rollbackError
+        ? `Could not save the school and phone details (${profileSaveError.message}), and the new account could not be rolled back. Remove account ${data.user.id} manually.`
+        : `Could not save the school and phone details: ${profileSaveError.message}`,
+      500,
+    )
+  }
+
   if (role === 'learner') {
     const { data: learnerDetails, error: registrationSaveError } = await authorization.context.adminClient
       .from('student_details')
-      .update({ registration_number: registrationNumber })
+      .update({ registration_number: registrationNumber, contact_number: phone })
       .eq('profile_id', data.user.id)
       .select('profile_id')
       .maybeSingle()
@@ -183,8 +204,8 @@ export async function POST(request: Request) {
       const detail = registrationSaveError?.message ?? 'The learner profile was not created.'
       return jsonError(
         rollbackError
-          ? `Could not save the registration number (${detail}), and the new account could not be rolled back. Remove account ${data.user.id} manually.`
-          : `Could not save the registration number: ${detail}`,
+          ? `Could not save the learner registration/contact details (${detail}), and the new account could not be rolled back. Remove account ${data.user.id} manually.`
+          : `Could not save the learner registration/contact details: ${detail}`,
         500,
       )
     }

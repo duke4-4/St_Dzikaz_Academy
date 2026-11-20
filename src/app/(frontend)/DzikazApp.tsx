@@ -1703,6 +1703,8 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [registrationNumber, setRegistrationNumber] = useState('')
+  const [school, setSchool] = useState('')
+  const [phone, setPhone] = useState('')
   const [role, setRole] = useState<'learner' | 'instructor' | 'admin'>('learner')
   const [userTab, setUserTab] = useState<'all' | ManagedUser['role']>('all')
   const [userSearch, setUserSearch] = useState('')
@@ -1784,7 +1786,7 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
           Authorization: `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ fullName, email: role === 'learner' ? '' : email, registrationNumber: role === 'learner' ? registrationNumber : '', role }),
+        body: JSON.stringify({ fullName, email: role === 'learner' ? '' : email, registrationNumber: role === 'learner' ? registrationNumber : '', school, phone, role }),
       })
       const result: unknown = await response.json()
       if (!response.ok) {
@@ -1814,6 +1816,8 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
       setFullName('')
       setEmail('')
       setRegistrationNumber('')
+      setSchool('')
+      setPhone('')
       setRole('learner')
       await loadUsers()
     } catch (requestError) {
@@ -1968,6 +1972,27 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
               <option value="instructor">Instructor</option>
               <option value="admin">Admin</option>
             </select>
+          </Field>
+          <Field label="School / organisation">
+            <input
+              className="form-input"
+              value={school}
+              onChange={(event) => setSchool(event.target.value)}
+              maxLength={120}
+              required={role !== 'admin'}
+              placeholder="School or organisation name"
+            />
+          </Field>
+          <Field label="Phone number">
+            <input
+              className="form-input"
+              type="tel"
+              value={phone}
+              onChange={(event) => setPhone(event.target.value)}
+              maxLength={40}
+              required={role !== 'admin'}
+              placeholder="e.g. +263 77 123 4567"
+            />
           </Field>
         </div>
         {error && (
@@ -4681,6 +4706,152 @@ function ProfileModal({
   )
 }
 
+function onboardingStepDescription(role: Role, label: string) {
+  const descriptions: Record<Role, Record<string, string>> = {
+    Learner: {
+      Overview: 'Start here for your class, enrolled subjects, marks, and learning progress.',
+      'My learning': 'Open the subjects and lessons available to your enrolled class.',
+      Classrooms: 'Find class resources, lessons, assignments, and quizzes.',
+      'My marks': 'Review assessment results and feedback from your teachers.',
+      Messages: 'Continue conversations with your teachers.',
+      'Notice board': 'Read announcements shared with learners.',
+      Calendar: 'See upcoming school events and dates.',
+    },
+    Instructor: {
+      Overview: 'Review your teaching activity, assigned classes, and subjects.',
+      'My subjects': 'Open a subject workspace for a class assigned to you.',
+      'My classes': 'See the learners in your assigned classes.',
+      'Lessons & resources': 'Publish lessons and share class materials.',
+      Assignments: 'Create work and quizzes for your classes.',
+      'Submissions & grading': 'Review learner work, enter marks, and give feedback.',
+      'Student performance': 'Follow progress for learners in your assigned classes.',
+      Messages: 'Continue conversations with your learners.',
+      'Notice board': 'Read and share relevant announcements.',
+      Calendar: 'See upcoming school events and dates.',
+    },
+    Admin: {
+      Overview: 'See live academy totals and recent activity.',
+      Users: 'Create learner accounts and staff accounts, and manage existing users.',
+      'Classes & Grades': 'Set up forms, sections, academic years, and terms.',
+      Subjects: 'Manage the subject catalogue and offer subjects to classes.',
+      'Teacher Assignments': 'Allocate teachers to their subjects and classes.',
+      'Student Enrolments': 'Place learners into classes so they can access class subjects.',
+      'Academic Reports': 'Review academic structure and records needing attention.',
+      Settings: 'Update academy preferences and account settings.',
+      'Notice board': 'Publish announcements for the academy community.',
+      Calendar: 'Manage upcoming school events and dates.',
+    },
+  }
+  return descriptions[role][label] ?? 'Open this area to use the tools available for your role.'
+}
+
+function OnboardingFlow({
+  role,
+  profile,
+  academyName,
+  onSave,
+  onComplete,
+  onNavigate,
+}: {
+  role: Role
+  profile: Profile
+  academyName: string
+  onSave: (profile: Profile) => Promise<string | undefined>
+  onComplete: () => Promise<string | undefined>
+  onNavigate: (page: string) => void
+}) {
+  const [draft, setDraft] = useState(profile)
+  const [stage, setStage] = useState<'profile' | 'tour'>('profile')
+  const [tourIndex, setTourIndex] = useState(0)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const tourSteps = navByRole[role]
+  const currentStep = tourSteps[tourIndex]
+
+  useEffect(() => setDraft(profile), [profile])
+
+  const saveProfileAndStartTour = async (event: FormEvent) => {
+    event.preventDefault()
+    setSaving(true)
+    setError('')
+    const saveError = await onSave({
+      ...draft,
+      name: draft.name.trim(),
+      username: draft.username.trim(),
+      school: draft.school.trim(),
+      phone: draft.phone.trim(),
+      bio: draft.bio.trim(),
+    })
+    setSaving(false)
+    if (saveError) {
+      setError(saveError)
+      return
+    }
+    setTourIndex(0)
+    setStage('tour')
+    onNavigate(tourSteps[0]?.label ?? 'Overview')
+  }
+
+  const finishTour = async () => {
+    setSaving(true)
+    setError('')
+    const completeError = await onComplete()
+    setSaving(false)
+    if (completeError) setError(completeError)
+  }
+
+  const goToTourStep = (index: number) => {
+    setTourIndex(index)
+    onNavigate(tourSteps[index]?.label ?? 'Overview')
+    setError('')
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] grid place-items-center overflow-y-auto bg-[#172a1e]/60 p-4 backdrop-blur-[2px] sm:p-6">
+      <section role="dialog" aria-modal="true" aria-labelledby="onboarding-title" className="card w-full max-w-2xl border border-white/70 p-6 shadow-2xl sm:p-8">
+        {stage === 'profile' ? (
+          <form onSubmit={saveProfileAndStartTour}>
+            <p className="text-[10px] font-extrabold uppercase tracking-[.18em] text-[#5D866C]">Welcome to {academyName}</p>
+            <h1 id="onboarding-title" className="font-display mt-2 text-2xl font-bold text-[#284633]">Set up your profile</h1>
+            <p className="mt-2 text-sm leading-6 text-[#718078]">Review the details entered by your administrator. You can edit them now or later from your profile settings.</p>
+            <div className="mt-6 grid gap-4 sm:grid-cols-2">
+              <Field label="Full name"><input className="form-input" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} maxLength={120} required /></Field>
+              <Field label="Username"><input className="form-input" value={draft.username} onChange={(event) => setDraft({ ...draft, username: event.target.value })} autoComplete="username" minLength={3} maxLength={30} pattern="[A-Za-z0-9_]{3,30}" title="Use 3 to 30 letters, numbers, or underscores." required /></Field>
+              <Field label="Sign-in email or account"><input className="form-input" value={draft.email} readOnly /></Field>
+              <Field label="School / organisation"><input className="form-input" value={draft.school} onChange={(event) => setDraft({ ...draft, school: event.target.value })} maxLength={120} required={role !== 'Admin'} /></Field>
+              <Field label="Phone number"><input className="form-input" type="tel" value={draft.phone} onChange={(event) => setDraft({ ...draft, phone: event.target.value })} maxLength={40} required={role !== 'Admin'} /></Field>
+              <div className="sm:col-span-2"><Field label="Bio"><textarea className="form-input min-h-20 resize-y" value={draft.bio} onChange={(event) => setDraft({ ...draft, bio: event.target.value })} maxLength={300} placeholder="A little about you" /></Field></div>
+            </div>
+            {error && <p role="alert" className="mt-4 rounded-lg bg-[#9b7466]/10 p-3 text-xs text-[#8a5548]">{error}</p>}
+            <div className="mt-6 flex items-center justify-between gap-3">
+              <span className="text-xs font-semibold text-[#789083]">Profile · Step 1 of 2</span>
+              <button className="primary-button" disabled={saving}>{saving ? 'Saving…' : 'Save profile and continue'}</button>
+            </div>
+          </form>
+        ) : currentStep ? (
+          <div>
+            <p className="text-[10px] font-extrabold uppercase tracking-[.18em] text-[#5D866C]">Your {role.toLowerCase()} workspace</p>
+            <div className="mt-5 flex items-center gap-3">
+              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-[#E6D8C3]/55 text-[#31533d]"><Icon name={currentStep.icon} size={22} /></span>
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-[#789083]">Tour · Step {tourIndex + 1} of {tourSteps.length}</p>
+                <h2 id="onboarding-title" className="font-display mt-1 text-2xl font-bold text-[#284633]">{currentStep.label}</h2>
+              </div>
+            </div>
+            <p className="mt-5 max-w-xl text-sm leading-6 text-[#52665a]">{onboardingStepDescription(role, currentStep.label)}</p>
+            <p className="mt-3 text-xs leading-5 text-[#789083]">The highlighted navigation item is open behind this guide. Continue through the sections you can use in your role.</p>
+            {error && <p role="alert" className="mt-4 rounded-lg bg-[#9b7466]/10 p-3 text-xs text-[#8a5548]">{error}</p>}
+            <div className="mt-7 flex flex-wrap items-center justify-between gap-3">
+              <button type="button" className="secondary-button" onClick={() => { if (tourIndex === 0) { setStage('profile'); setError(''); onNavigate('Overview') } else goToTourStep(tourIndex - 1) }}>Back</button>
+              <button type="button" className="primary-button" disabled={saving} onClick={() => tourIndex < tourSteps.length - 1 ? goToTourStep(tourIndex + 1) : void finishTour()}>{saving ? 'Finishing…' : tourIndex < tourSteps.length - 1 ? 'Next section' : 'Finish onboarding'}</button>
+            </div>
+          </div>
+        ) : null}
+      </section>
+    </div>
+  )
+}
+
 export default function App() {
   const [supabase] = useState(getSupabaseBrowserClient)
   const [organizationName, setOrganizationName] = useState('St Dzikaz Academy')
@@ -4688,6 +4859,7 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true)
   const [profileReady, setProfileReady] = useState(false)
   const [requiresPasswordChange, setRequiresPasswordChange] = useState(false)
+  const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [authError, setAuthError] = useState('')
   const [role, setRole] = useState<Role>('Learner')
   const [active, setActive] = useState('Overview')
@@ -4729,6 +4901,7 @@ export default function App() {
       setAuthLoading(false)
       setProfileReady(!session)
       if (!session) setRequiresPasswordChange(false)
+      if (!session) setOnboardingOpen(false)
     })
 
     supabase.auth.getSession().then(({ data, error }) => {
@@ -4737,7 +4910,10 @@ export default function App() {
       setAuthUser(data.session?.user ?? null)
       setAuthLoading(false)
       setProfileReady(!data.session)
-      if (!data.session) setRequiresPasswordChange(false)
+      if (!data.session) {
+        setRequiresPasswordChange(false)
+        setOnboardingOpen(false)
+      }
     })
 
     return () => {
@@ -4766,12 +4942,13 @@ export default function App() {
         return
       }
 
-      const { data: profileExtras } = await supabase
-        .from('profiles')
-        .select('bio, avatar_url')
-        .eq('id', authUser.id)
-        .maybeSingle()
+      const [profileExtrasResult, onboardingResult] = await Promise.all([
+        supabase.from('profiles').select('bio, avatar_url').eq('id', authUser.id).maybeSingle(),
+        supabase.from('profiles').select('onboarding_completed_at').eq('id', authUser.id).maybeSingle(),
+      ])
       if (!active) return
+      const profileExtras = profileExtrasResult.data
+      setOnboardingOpen(Boolean(onboardingResult.error || !onboardingResult.data?.onboarding_completed_at))
 
       const roleByDatabaseValue: Record<string, Role> = {
         learner: 'Learner',
@@ -4790,7 +4967,7 @@ export default function App() {
       const { data: studentDetails, error: detailsError } = nextRole === 'Learner'
         ? await supabase
             .from('student_details')
-            .select('contact_number')
+            .select('contact_number, registration_number')
             .eq('profile_id', authUser.id)
             .maybeSingle()
         : { data: null, error: null }
@@ -4816,7 +4993,7 @@ export default function App() {
           image: profileExtras?.avatar_url || undefined,
           avatarFile: undefined,
           email: authUser.email?.endsWith('@login.dzikaz.ac.zw')
-            ? 'Registration number and password'
+            ? studentDetails?.registration_number || 'Registration number and password'
             : authUser.email ?? '',
           school: data.school,
           phone: nextRole === 'Learner' ? studentDetails?.contact_number ?? '' : data.phone,
@@ -4857,6 +5034,59 @@ export default function App() {
     if (!supabase) return
     const { error } = await supabase.auth.signOut()
     if (error) setAuthError(`Could not sign out: ${error.message}`)
+  }
+
+  const saveProfile = async (profile: Profile): Promise<string | undefined> => {
+    if (!supabase || !authUser) return 'Your sign-in session is no longer available.'
+    let avatarUrl = profile.image ?? ''
+    if (profile.avatarFile) {
+      const avatarPath = `${authUser.id}/avatar`
+      const { error: avatarError } = await supabase.storage
+        .from('profile-avatars')
+        .upload(avatarPath, profile.avatarFile, {
+          upsert: true,
+          contentType: profile.avatarFile.type,
+          cacheControl: '3600',
+        })
+      if (avatarError) return avatarError.message
+      avatarUrl = `${supabase.storage.from('profile-avatars').getPublicUrl(avatarPath).data.publicUrl}?v=${Date.now()}`
+    }
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .update({
+        full_name: profile.name.trim(),
+        username: profile.username.trim(),
+        bio: profile.bio.trim(),
+        avatar_url: avatarUrl,
+        school: profile.school.trim(),
+        phone: profile.phone.trim(),
+      })
+      .eq('id', authUser.id)
+    if (profileError) return profileError.message
+    if (role === 'Learner') {
+      const { error: detailsError } = await supabase
+        .from('student_details')
+        .update({ contact_number: profile.phone.trim() })
+        .eq('profile_id', authUser.id)
+      if (detailsError) return detailsError.message
+    }
+    setProfiles((current) => ({
+      ...current,
+      [role]: { ...profile, image: avatarUrl, avatarFile: undefined },
+    }))
+    return undefined
+  }
+
+  const completeOnboarding = async (): Promise<string | undefined> => {
+    if (!supabase || !authUser) return 'Your sign-in session is no longer available.'
+    const { error } = await supabase
+      .from('profiles')
+      .update({ onboarding_completed_at: new Date().toISOString() })
+      .eq('id', authUser.id)
+    if (error) return `Could not save onboarding progress: ${error.message}. Apply the first-login onboarding migration and try again.`
+    setOnboardingOpen(false)
+    setActive('Overview')
+    return undefined
   }
 
   if (authLoading || (authUser && !profileReady)) {
@@ -4962,49 +5192,12 @@ export default function App() {
           </button>
         ))}
       </nav>
+      {onboardingOpen && <OnboardingFlow role={role} profile={profiles[role]} academyName={organizationName} onSave={saveProfile} onComplete={completeOnboarding} onNavigate={setActive} />}
       <ProfileModal
-        open={profileOpen}
+        open={profileOpen && !onboardingOpen}
         profile={profiles[role]}
         onClose={() => setProfileOpen(false)}
-        onSave={async (profile) => {
-          let avatarUrl = profile.image ?? ''
-          if (profile.avatarFile) {
-            const avatarPath = `${authUser.id}/avatar`
-            const { error: avatarError } = await supabase.storage
-              .from('profile-avatars')
-              .upload(avatarPath, profile.avatarFile, {
-                upsert: true,
-                contentType: profile.avatarFile.type,
-                cacheControl: '3600',
-              })
-            if (avatarError) return avatarError.message
-            avatarUrl = `${supabase.storage.from('profile-avatars').getPublicUrl(avatarPath).data.publicUrl}?v=${Date.now()}`
-          }
-          const { error: profileError } = await supabase
-            .from('profiles')
-            .update({
-              full_name: profile.name.trim(),
-              username: profile.username.trim(),
-              bio: profile.bio.trim(),
-              avatar_url: avatarUrl,
-              school: profile.school.trim(),
-              ...(role === 'Learner' ? {} : { phone: profile.phone.trim() }),
-            })
-            .eq('id', authUser.id)
-          if (profileError) return profileError.message
-          if (role === 'Learner') {
-            const { error: detailsError } = await supabase
-              .from('student_details')
-              .update({ contact_number: profile.phone.trim() })
-              .eq('profile_id', authUser.id)
-            if (detailsError) return detailsError.message
-          }
-          setProfiles((current) => ({
-            ...current,
-            [role]: { ...profile, image: avatarUrl, avatarFile: undefined },
-          }))
-          return undefined
-        }}
+        onSave={saveProfile}
         onChangePassword={async (password) => {
           const { error: passwordError } = await supabase.auth.updateUser({ password })
           return passwordError?.message
