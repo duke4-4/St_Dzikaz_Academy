@@ -3366,7 +3366,10 @@ function LoginPage({
         const { error: signUpError } = await supabase.auth.signUp({
           email: email.trim().toLowerCase(),
           password,
-          options: { data: { username, full_name: fullName.trim() } },
+          options: {
+            data: { username, full_name: fullName.trim() },
+            emailRedirectTo: window.location.origin,
+          },
         })
         if (signUpError) throw signUpError
         setMessage('Account created. Check your email to confirm your address, then sign in.')
