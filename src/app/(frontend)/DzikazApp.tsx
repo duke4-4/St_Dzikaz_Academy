@@ -1,8 +1,10 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import Image from 'next/image'
 import type { SupabaseClient, User } from '@supabase/supabase-js'
 import { getSupabaseBrowserClient } from '@/lib/supabase'
+import academyLogo from '../../../public/assets/st_dzikaz_logo.jpg.jpeg'
 
 type Role = 'Learner' | 'Instructor' | 'Admin'
 type IconName =
@@ -3723,10 +3725,12 @@ function LogoMark() {
 function LogoImage({ className }: { className: string }) {
   return (
     <span className={`relative block shrink-0 overflow-hidden bg-[#f8f8f5] ${className}`}>
-      <img
-        src="/assets/st_dzikaz_logo.jpg.jpeg"
+      <Image
+        src={academyLogo}
         alt="St Dzikaz Academy"
-        className="h-full w-full object-contain"
+        fill
+        sizes="64px"
+        className="object-contain"
       />
       <span
         aria-hidden="true"
