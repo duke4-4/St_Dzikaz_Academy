@@ -1932,13 +1932,15 @@ function AdminUsersPage({ supabase }: { supabase: SupabaseClient }) {
               <input
                 className="form-input"
                 autoComplete="off"
+                autoCapitalize="characters"
                 value={registrationNumber}
-                onChange={(event) => setRegistrationNumber(event.target.value)}
-                maxLength={40}
+                onChange={(event) => setRegistrationNumber(event.target.value.toUpperCase())}
+                maxLength={8}
+                pattern="([A-Za-z][0-9]{6}[A-Za-z]|[A-Za-z][0-9]{4}[A-Za-z]{3})"
                 required
-                placeholder="e.g. 2026-001"
+                placeholder="e.g. A123456B"
               />
-              <p className="mt-1 text-[11px] text-[#789083]">Letters and numbers are used for sign-in; spaces and punctuation are ignored.</p>
+              <p className="mt-1 text-[11px] text-[#789083]">Use the REG format: one letter + six digits + one letter, or one letter + four digits + three letters.</p>
             </Field>
           ) : (
             <Field label="Email address">

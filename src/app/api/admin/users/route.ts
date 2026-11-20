@@ -145,15 +145,15 @@ export async function POST(request: Request) {
   let accountEmail = email
   let registrationNumber = ''
   if (role === 'learner') {
-    registrationNumber = registrationInput.toLowerCase().replace(/[^a-z0-9]/g, '')
-    if (registrationInput.length > 40 || !/^[a-z0-9]{3,30}$/.test(registrationNumber)) {
-      return jsonError('Enter a registration number with 3 to 30 letters or numbers.', 400)
+    registrationNumber = registrationInput.toUpperCase()
+    if (!/^(?:[A-Z]\d{6}[A-Z]|[A-Z]\d{4}[A-Z]{3})$/.test(registrationNumber)) {
+      return jsonError('Enter a REG number in one of these formats: one letter, six digits, one letter; or one letter, four digits, three letters.', 400)
     }
-    accountEmail = `student+${registrationNumber}@login.dzikaz.ac.zw`
+    accountEmail = `student+${registrationNumber.toLowerCase()}@login.dzikaz.ac.zw`
     const { data: existingRegistration, error: registrationError } = await authorization.context.adminClient
       .from('student_details')
       .select('profile_id')
-      .eq('registration_number', registrationNumber)
+      .ilike('registration_number', registrationNumber)
       .maybeSingle()
     if (registrationError) return jsonError('Could not verify that registration number.', 500)
     if (existingRegistration) return jsonError('A learner with that registration number already exists.', 409)
