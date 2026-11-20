@@ -25,7 +25,7 @@ The browser only uses the Supabase URL and publishable anon key. Never expose a 
 | `events` | Scheduled events, audience, and venue. |
 | `notices` | Announcements and audience. |
 | `marks` | Student assessment scores, maximum score, date, feedback, subject, and recording instructor. |
-| `learning_progress` | Per-learner completed lesson count for the featured course, protected by row-level security. |
+| `lessons` / `lesson_completions` | Class-scoped lesson content and per-learner completion records, protected by row-level security. |
 | `academy_settings` | Public academy display name, editable by administrators. |
 | `conversations` | Private learner/instructor conversation scoped to an enrolled subject. |
 | `messages` | Messages and read status within a conversation. |
@@ -39,9 +39,11 @@ If learner signup fails because `student_details.registration_number` is null, a
 Admins and other existing users sign in with their email address. The academy dashboard is also available at `/admin/` (including its trailing slash).
 Gmail addresses are supported for email/password sign-in and signup. In Supabase Auth, keep the email provider enabled and configure the app's site URL and redirect allowlist for both the site root and `/admin/`.
 
-The classroom workflow is in `supabase/migrations/202611180001_classroom_workflows.sql`. Apply it with `supabase db push` before using classroom pages. It adds subject archiving, student enrollment by registration number, classroom documents, assignments and submissions, attendance, and the private `classroom-files` Storage bucket. Classroom and submitted files are limited to PDF/DOC/DOCX and 10 MB. Archived subjects keep their records and are read-only.
+The classroom workflow is in `supabase/migrations/202611180001_classroom_workflows.sql`. Apply it with `supabase db push` before using classroom pages. It adds subject archiving, student enrollment by registration number, classroom documents, assignments and submissions, attendance, and the private `classroom-files` Storage bucket. Classroom and submitted files are limited to PDF/DOC/DOCX/PPTX and 10 MB. Archived subjects keep their records and are read-only.
 
-Lesson progress is stored in `supabase/migrations/202611200001_learning_progress.sql`. Apply it with `supabase db push` so the learner dashboard can save and restore each student's completed lesson count.
+Role-based academic management is in `supabase/migrations/202611210001_academic_structure.sql`. Apply it with `supabase db push` before using Admin Classes & Grades, Subjects, Teacher Assignments, Student Enrolments, or teacher workspaces. It adds academic years/terms, classes, class-subject offerings, teacher assignments, class enrolments, lessons, and multiple-choice quizzes. Existing teacher ownership and learner subject enrollments are mapped only when class name and academic year both match exactly; unmatched records remain unchanged and are listed in the Admin Academic Reports review section. New assignments are scoped by class using row-level security.
+
+Lesson progress is stored per published lesson in `lesson_completions`, created by `supabase/migrations/202611210001_academic_structure.sql`. Learners can mark their own published lessons complete or undo completion; the dashboard totals use those real records.
 
 Profile bios and public profile photos are added by `supabase/migrations/202611200002_profile_bio_and_avatars.sql`. Apply it with `supabase db push` before using the expanded profile editor.
 

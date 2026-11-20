@@ -144,3 +144,6 @@
 *.stl                filter=lfs diff=lfs merge=lfs -text
 *.nc                 filter=lfs diff=lfs merge=lfs -text
 *.mat                filter=lfs diff=lfs merge=lfs -text
+
+# Keep the site logo directly available to build services that do not fetch LFS objects.
+public/assets/st_dzikaz_logo.png -filter -diff -merge -text
